@@ -1598,133 +1598,56 @@ ${isOwner ? '\nТЫ ОБЩАЕШЬСЯ С ВЛАДЕЛЬЦЕМ ПЛАТФОРМ�
     }
   }
 
-  // ===== Определение intent'а =====
+  // ===== Определение intent'а через AI =====
 
   private async detectIntent(message: string): Promise<UserIntent> {
-    const lowerMessage = message.toLowerCase();
-
-    // ── Точные ключевые слова ──────────────────────────────────
-    const intentPatterns: Record<UserIntent, string[]> = {
-      create_agent: [
-        // явное создание
-        'создай', 'создать', 'сделай', 'make', 'create', 'build',
-        'новый агент', 'new agent', 'добавь агента', 'напиши агента',
-        'хочу агента', 'нужен агент', 'нужно сделать агента',
-        'агент который', 'агента который', 'агент для', 'агента для',
-        'напиши бота', 'сделай бота который', 'хочу бота который',
-        // команды в повелительном наклонении (пользователь говорит что делать)
-        'проверяй', 'проверять', 'мониторь', 'мониторинг', 'мониторить',
-        'отслеживай', 'отслеживать', 'следи за', 'уведомляй', 'уведомлять',
-        'отправляй', 'отправлять', 'пересылай', 'сообщай', 'сообщать',
-        'считай', 'считать', 'вычисляй', 'парси', 'парсить', 'собирай',
-        'ищи', 'искать', 'загружай', 'скачивай',
-        // расписание
-        'каждый час', 'каждую минуту', 'каждые', 'каждый день', 'каждую неделю',
-        'по расписанию', 'автоматически', 'scheduler', 'cron', 'периодически',
-        'раз в час', 'раз в день', 'раз в неделю', 'раз в минуту',
-        // уведомления
-        'уведоми когда', 'напиши мне когда', 'сообщи когда', 'alert', 'notify',
-        // блокчейн задачи
-        'баланс кошелька', 'следи за кошельком', 'мониторинг кошелька',
-        'цена ton', 'курс ton', 'стоимость ton',
-      ],
-      edit_agent: [
-        'измени', 'изменить', 'edit', 'update', 'поменяй', 'обнови', 'отредактируй',
-        'добавь в агент', 'убери из агента', 'исправь агента',
-      ],
-      run_agent: [
-        'запусти', 'запустить', 'run', 'execute', 'выполни', 'старт', 'start',
-        'активируй', 'активировать',
-      ],
-      delete_agent: ['удали', 'удалить', 'delete', 'remove', 'убери агента'],
-      list_agents: [
-        'список', 'мои агенты', 'list', 'show agents',
-        'покажи агентов', 'все агенты', 'сколько агентов',
-      ],
-      explain_agent: [
-        'объясни', 'объяснить', 'explain', 'расскажи', 'как работает', 'что делает',
-      ],
-      debug_agent: ['debug', 'найди ошибки', 'почини агента', 'bug'],
-      nft_analysis: [
-        // Прямые NFT вопросы
-        'floor price', 'floor цена', 'флор', 'nft', 'нфт',
-        // Площадки
-        'getgems', 'гетгемс', 'fragment', 'фрагмент', 'tonsea', 'disintar',
-        // Конкретные коллекции
-        'панки', 'punks', 'punk', 'ton punks', 'tonpunks', 'tonxpunks',
-        'diamond', 'diamonds', 'алмазы', 'алмаз',
-        'anonymous', 'анонимный', 'телеграм',
-        'notcoin', 'ноткоин',
-        'rocket', 'ракета', 'rocket nft',
-        'whales', 'киты', 'whale',
-        'durov', 'дуров',
-        'getgems коллекция', 'nft коллекция',
-        // Вопросы о ценах и рынке
-        'цена нфт', 'цену нфт', 'сколько стоит нфт', 'стоимость нфт',
-        'объём продаж нфт', 'volume nft', 'nft volume',
-        'топ нфт', 'top nft', 'лучшие нфт', 'trending nft', 'трендовые',
-        'купить нфт', 'продать нфт', 'nft рынок', 'рынок нфт',
-        'как дела у', 'что с ценой', 'расскажи про коллекцию',
-        'аналитика нфт', 'анализ нфт', 'nft анализ', 'nft аналитика',
-        'прогноз нфт', 'прогноз цены нфт', 'предскажи цену',
-        'держать нфт', 'продавать нфт', 'покупать нфт',
-        'ликвидность нфт', 'держателей нфт', 'holders nft',
-        'последние продажи', 'recent sales', 'activity nft',
-        // Telegram Gifts
-        'подарки телеграм', 'telegram gifts', 'тг подарки', 'gift', 'гифт',
-      ],
-      platform_settings: ['настройки платформы', 'platform settings', 'конфигурация сервера'],
-      user_management: ['управление пользователями', 'список пользователей'],
-      general_chat: [],
-      unknown: [],
-    };
-
-    for (const [intent, patterns] of Object.entries(intentPatterns)) {
-      for (const pattern of patterns) {
-        if (lowerMessage.includes(pattern)) {
-          return intent as UserIntent;
-        }
-      }
+    // Все запросы проходят через AI — никаких шаблонных ключевых слов.
+    // AI сам понимает что хочет пользователь и выбирает нужный intent.
+    try {
+      return await this.classifyIntentWithAI(message);
+    } catch {
+      return 'general_chat';
     }
-
-    // ── AI-классификация для неоднозначных сообщений ──────────
-    // Если сообщение длинное (> 20 символов) и похоже на задачу — пробуем AI
-    if (message.length > 20) {
-      try {
-        const aiIntent = await this.classifyIntentWithAI(message);
-        if (aiIntent !== 'general_chat') return aiIntent;
-      } catch {
-        // fallback — general_chat
-      }
-    }
-
-    return 'general_chat';
   }
 
-  /** AI-классификация intent для сложных случаев */
+  /** AI-классификация intent — единственная точка принятия решений */
   private async classifyIntentWithAI(message: string): Promise<UserIntent> {
     const { text } = await callWithFallback([
       {
         role: 'system',
-        content: `Classify the user message into ONE intent category. Reply with ONLY the category name.
+        content: `You are an intent classifier for a TON blockchain agent platform.
+Analyze the user message and return ONLY one category name — nothing else, no explanations.
 
 Categories:
-- create_agent: user wants to automate a task, build/create a bot/agent/script, monitor something, send notifications, schedule a job, track prices/balances, make periodic requests
-- nft_analysis: user asks about NFT prices, floor price, NFT collections (TON Punks, diamonds, etc.), NFT market analysis, GetGems, Fragment gifts, NFT trading advice, "как панки", "что с нфт"
-- run_agent: user wants to start/execute an existing agent
-- list_agents: user wants to see their agents
-- edit_agent: user wants to modify an existing agent
-- general_chat: everything else (questions, chit-chat, help requests)
+- create_agent: user wants to build/create/make an agent, bot, script, automation; wants to monitor/track something, send scheduled notifications, fetch data periodically, set up triggers or cron jobs, automate any task
+- edit_agent: user wants to change/update/modify/fix an existing agent
+- run_agent: user wants to start/run/execute/activate an existing agent
+- delete_agent: user wants to delete/remove an agent
+- list_agents: user wants to see/list their agents, check how many agents they have
+- explain_agent: user wants to understand/explain what an agent does or how it works
+- debug_agent: user wants to find bugs, debug, audit, or fix errors in an agent
+- nft_analysis: user asks about NFT prices, floor prices, NFT collections (TON Punks, diamonds, etc.), NFT market, GetGems, Fragment, Telegram Gifts, NFT trading
+- platform_settings: user asks about platform configuration or server settings
+- user_management: user asks about managing users on the platform
+- general_chat: everything else — questions, greetings, help, general conversation
 
-Important: if the message describes ANY automation task, monitoring, scheduling, or data fetching goal → classify as create_agent
-If message asks about NFT market, prices, collections → classify as nft_analysis`,
+Rules:
+- If the message describes ANY goal involving automation, scheduling, monitoring, notifications → create_agent
+- If the message is about NFT market data, prices, collections → nft_analysis
+- When in doubt between create_agent and general_chat, prefer create_agent for task-like descriptions
+- Reply with ONLY the category name, no punctuation, no explanation`,
       },
-      { role: 'user', content: `Message: "${message}"` },
-    ], 0, 20);
+      { role: 'user', content: message },
+    ], 0, 15);
 
     const result = text.trim().toLowerCase().replace(/[^a-z_]/g, '');
-    const valid: UserIntent[] = ['create_agent', 'edit_agent', 'run_agent', 'delete_agent', 'list_agents', 'nft_analysis', 'general_chat'];
-    return valid.includes(result as UserIntent) ? (result as UserIntent) : 'general_chat';
+    const valid: UserIntent[] = [
+      'create_agent', 'edit_agent', 'run_agent', 'delete_agent',
+      'list_agents', 'explain_agent', 'debug_agent', 'nft_analysis',
+      'platform_settings', 'user_management', 'general_chat',
+    ];
+    const matched = valid.find(v => result.includes(v));
+    return matched ?? 'general_chat';
   }
 
   // ===== Публичные методы =====
