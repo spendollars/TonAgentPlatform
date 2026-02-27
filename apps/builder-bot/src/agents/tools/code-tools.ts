@@ -275,22 +275,39 @@ async function agent(context) {
 }
 
 ━━━ AVAILABLE APIs (public, no auth needed) ━━━
-TON balances/txs: toncenter.com/api/v2/getAddressBalance?address=X | tonapi.io/v2/accounts/X/events | tonapi.io/v2/accounts/X/jettons/balances
-Prices: api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd | api.binance.com/api/v3/ticker/price?symbol=TONUSDT
-NFT collections (GetGems GraphQL): POST https://api.getgems.io/graphql
-  Search by name: {"query":"{ alphaNftCollectionSearch(query: \\"NAME\\", count: 5) { items { address name approximateItemsCount floorPrice } } }"}
-  Floor price from address: GET https://tonapi.io/v2/nfts/collections/RAW_ADDR/items?limit=100 → scan sale.price.value
-  Collection info: GET https://tonapi.io/v2/nfts/collections/RAW_ADDR → metadata.name, next_item_index
-  Convert EQ addr to raw: base64url decode, take bytes 2-34, hex encode with "0:" prefix
-DEX prices: https://api.ston.fi/v1/assets | https://api.dedust.io/v2/pools
+TON balances/txs: toncenter.com/api/v2/getAddressBalance?address=X | tonapi.io/v2/accounts/X/events
+Prices: api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd
+NFT floor price: tonapi.io/v2/nfts/collections/RAW_ADDR/items?limit=100 → scan items[].sale.price.value (nanotons)
+NFT collection info: tonapi.io/v2/nfts/collections/RAW_ADDR → metadata.name, next_item_index
+DEX: api.ston.fi/v1/assets | api.dedust.io/v2/pools
 Any other public REST API — just use fetch()
+
+━━━ NFT COLLECTION SEARCH PATTERN (COPY EXACTLY) ━━━
+To find a collection address by name, use this EXACT pattern (single quotes, string concat, no template literals):
+
+  var gqlBody = '{"query":"{ alphaNftCollectionSearch(query: \\"' + collectionName.replace(/"/g, '') + '\\", count: 1) { items { address name floorPrice } } }"}';
+  var searchResp = await fetch('https://api.getgems.io/graphql', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: gqlBody
+  });
+  var searchData = await searchResp.json();
+  var items = searchData.data.alphaNftCollectionSearch.items;
+  if (!items || items.length === 0) {
+    notify('Collection not found: ' + collectionName);
+    return;
+  }
+  var collectionAddr = items[0].address;
+  var floorNano = items[0].floorPrice ? parseInt(items[0].floorPrice) : 0;
+  var floorTon = floorNano / 1e9;
 
 ━━━ CRITICAL RULES — NO HARDCODE ━━━
 • NEVER hardcode wallet addresses, collection addresses, API keys, or any user-specific data
 • ALL configurable values MUST come from context.config.KEY or be passed as {{PLACEHOLDER}}
-• For NFT monitoring: search collection by name via GetGems API, cache the found address with setState()
+• For NFT monitoring: use the NFT COLLECTION SEARCH PATTERN above to find address by name
+• Cache found address: setState('col_addr', collectionAddr) — check getState('col_addr') first
 • For any "monitor X" task: always fetch REAL data from APIs, never use fake/random values
-• If collection/address not found via API: notify user with clear error message, do NOT use fallback hardcoded data
+• If collection not found: notify user with clear error, do NOT use fallback hardcoded data
 
 ━━━ PLACEHOLDERS ━━━
 Use {{NAME}} for values user must configure. Read from context.config:
