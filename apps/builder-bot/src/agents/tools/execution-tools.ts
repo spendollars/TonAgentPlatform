@@ -9,21 +9,48 @@ import {
   getExecutionHistoryRepository,
 } from '../../db/schema-extensions';
 
-// ── Sanitizer: fix literal newlines inside string literals ──────────────────
-// AI code generators sometimes emit actual \n characters inside quoted strings
-// instead of the escape sequence \\n, causing SyntaxError "Unterminated string".
+// ── Sanitizer: fix common AI code generation issues ──────────────────────────
+// 1. Fixes literal newlines inside string literals (SyntaxError "Unterminated string")
+// 2. Fixes invalid escape sequences like \" inside single-quoted strings
+//    (SyntaxError "Expecting Unicode escape sequence \uXXXX")
+// 3. Fixes literal \n sequences (\\n in source) that should be escape sequences
 function fixLiteralNewlinesInStrings(code: string): string {
   let result = '';
   let i = 0;
   while (i < code.length) {
     const ch = code[i];
-    if (ch === "'" || ch === '"') {
-      const quote = ch;
+    if (ch === "'") {
+      // Single-quoted string: fix literal newlines AND invalid escape sequences
+      result += ch; i++;
+      while (i < code.length) {
+        const c = code[i];
+        if (c === '\\') {
+          const next = code[i + 1] || '';
+          // Valid JS escape sequences in single-quoted strings:
+          // \n \r \t \\ \' \0 \b \f \v \uXXXX \xXX
+          const validEscapes = new Set(['n', 'r', 't', '\\', "'", '0', 'b', 'f', 'v', 'u', 'x', '\n', '\r']);
+          if (validEscapes.has(next)) {
+            result += c + next; i += 2;
+          } else if (next === '"') {
+            // \" inside single-quoted string is invalid — just use "
+            result += '"'; i += 2;
+          } else {
+            // Unknown escape — just output the character without backslash
+            result += next; i += 2;
+          }
+        }
+        else if (c === "'") { result += c; i++; break; }
+        else if (c === '\n') { result += '\\n'; i++; }
+        else if (c === '\r') { i++; }
+        else { result += c; i++; }
+      }
+    } else if (ch === '"') {
+      // Double-quoted string
       result += ch; i++;
       while (i < code.length) {
         const c = code[i];
         if (c === '\\') { result += c + (code[i + 1] || ''); i += 2; }
-        else if (c === quote) { result += c; i++; break; }
+        else if (c === '"') { result += c; i++; break; }
         else if (c === '\n') { result += '\\n'; i++; }
         else if (c === '\r') { i++; }
         else { result += c; i++; }
