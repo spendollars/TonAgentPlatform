@@ -350,6 +350,88 @@ export class ExecutionTools {
             return data[id]?.usd ?? 0;
           },
 
+          // ── searchNFTCollection(name) — найти NFT коллекцию по имени ──
+          // Возвращает { address, name, floorTon, items } или null если не найдено
+          searchNFTCollection: async (name: string): Promise<{ address: string; name: string; floorTon: number; items: number } | null> => {
+            try {
+              // Метод 1: GetGems GraphQL
+              const gqlBody = JSON.stringify({
+                query: `{ alphaNftCollectionSearch(query: "${name.replace(/"/g, '').replace(/\\/g, '')}", count: 3) { items { address name floorPrice approximateItemsCount } } }`
+              });
+              const resp = await nativeFetch('https://api.getgems.io/graphql', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: gqlBody,
+              });
+              if (resp.ok) {
+                const data = await resp.json() as any;
+                const items = data?.data?.alphaNftCollectionSearch?.items || [];
+                if (items.length > 0) {
+                  const col = items[0];
+                  return {
+                    address: col.address,
+                    name: col.name || name,
+                    floorTon: col.floorPrice ? parseInt(col.floorPrice) / 1e9 : 0,
+                    items: col.approximateItemsCount || 0,
+                  };
+                }
+              }
+            } catch {}
+
+            try {
+              // Метод 2: GetGems HTML scraping
+              const htmlResp = await nativeFetch(
+                'https://getgems.io/nft?query=' + encodeURIComponent(name),
+                { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html' } }
+              );
+              if (htmlResp.ok) {
+                const html = await htmlResp.text() as string;
+                const m = html.match(/\/collection\/(EQ[A-Za-z0-9_\-]{46})/);
+                if (m) {
+                  return { address: m[1], name, floorTon: 0, items: 0 };
+                }
+              }
+            } catch {}
+
+            return null;
+          },
+
+          // ── getNFTFloorPrice(address) — floor price коллекции по адресу ──
+          // Возвращает floor price в TON (0 если нет листингов)
+          getNFTFloorPrice: async (address: string): Promise<number> => {
+            try {
+              // Конвертируем EQ адрес в raw формат
+              let rawAddr = address;
+              if (address && !address.startsWith('0:')) {
+                try {
+                  const s = address.replace(/-/g, '+').replace(/_/g, '/');
+                  const padded = s + '=='.slice(0, (4 - s.length % 4) % 4);
+                  const buf = Buffer.from(padded, 'base64');
+                  rawAddr = '0:' + buf.slice(2, 34).toString('hex');
+                } catch {}
+              }
+              const prices: number[] = [];
+              for (let offset = 0; offset < 200; offset += 100) {
+                const r = await nativeFetch(
+                  `https://tonapi.io/v2/nfts/collections/${rawAddr}/items?limit=100&offset=${offset}`,
+                  { headers: { 'Accept': 'application/json' } }
+                );
+                if (!r.ok) break;
+                const d = await r.json() as any;
+                const items: any[] = d.nft_items || [];
+                if (items.length === 0) break;
+                for (const item of items) {
+                  const val = item?.sale?.price?.value;
+                  if (val && parseInt(val) > 0) prices.push(parseInt(val) / 1e9);
+                }
+              }
+              prices.sort((a: number, b: number) => a - b);
+              return prices.length > 0 ? prices[0] : 0;
+            } catch {
+              return 0;
+            }
+          },
+
           // ── Cross-agent messaging (OpenClaw sessions_send pattern) ──
           agent_send: (toAgentId: number, data: any) => {
             sendAgentMessage(agentId, toAgentId, data);
