@@ -410,6 +410,7 @@ export class PlatformToolExecutor {
     }
 
     // AI-генерация (всегда — шаблоны только в маркетплейсе для ручного выбора)
+    const desc = args.description;
     const detected = detectTriggerFromDescription(desc);
     const triggerType = args.trigger_type || detected.triggerType;
     const triggerConfig = args.interval_ms
