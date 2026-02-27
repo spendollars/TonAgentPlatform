@@ -380,14 +380,23 @@ export class ExecutionTools {
           // ── searchNFTCollection(name) — найти NFT коллекцию по имени ──
           // Возвращает { address, name, floorTon, items } или null если не найдено
           searchNFTCollection: async (name: string): Promise<{ address: string; name: string; floorTon: number; items: number } | null> => {
+            const nameLower = name.toLowerCase().trim();
+            const slug = nameLower.replace(/[^a-z0-9]/g, '');
+
+            // Метод 1: GetGems GraphQL (работает с правильными заголовками)
             try {
-              // Метод 1: GetGems GraphQL
               const gqlBody = JSON.stringify({
-                query: `{ alphaNftCollectionSearch(query: "${name.replace(/"/g, '').replace(/\\/g, '')}", count: 3) { items { address name floorPrice approximateItemsCount } } }`
+                query: `{ alphaNftCollectionSearch(query: "${name.replace(/['"\\]/g, '')}", count: 3) { items { address name floorPrice approximateItemsCount } } }`
               });
               const resp = await nativeFetch('https://api.getgems.io/graphql', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json',
+                  'Origin': 'https://getgems.io',
+                  'Referer': 'https://getgems.io/',
+                  'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                },
                 body: gqlBody,
               });
               if (resp.ok) {
@@ -405,17 +414,69 @@ export class ExecutionTools {
               }
             } catch {}
 
+            // Метод 2: Fragment Telegram Gifts — для коллекций типа "Cupid Charm", "Lol Pop" и т.д.
+            // Slug = имя без пробелов/спецсимволов в нижнем регистре
+            // Адрес получаем через TonAPI поиск по raw_collection_content
             try {
-              // Метод 2: GetGems HTML scraping
-              const htmlResp = await nativeFetch(
-                'https://getgems.io/nft?query=' + encodeURIComponent(name),
-                { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html' } }
+              // Проверяем что Fragment знает эту коллекцию
+              const fragResp = await nativeFetch(
+                `https://nft.fragment.com/collection/${slug}.json`,
+                { headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' } }
               );
-              if (htmlResp.ok) {
-                const html = await htmlResp.text() as string;
-                const m = html.match(/\/collection\/(EQ[A-Za-z0-9_\-]{46})/);
-                if (m) {
-                  return { address: m[1], name, floorTon: 0, items: 0 };
+              if (fragResp.ok) {
+                const fragMeta = await fragResp.json() as any;
+                if (fragMeta?.name) {
+                  // Fragment знает коллекцию — ищем адрес через TonAPI
+                  // raw_collection_content содержит URL метаданных в hex
+                  // Ищем hex-encoded строку с slug
+                  const slugHex = Buffer.from(slug).toString('hex');
+                  for (let offset = 0; offset < 500; offset += 100) {
+                    const resp = await nativeFetch(
+                      `https://tonapi.io/v2/nfts/collections?limit=100&offset=${offset}`,
+                      { headers: { 'Accept': 'application/json' } }
+                    );
+                    if (!resp.ok) break;
+                    const data = await resp.json() as any;
+                    const cols: any[] = data?.nft_collections || [];
+                    if (cols.length === 0) break;
+                    const found = cols.find((c: any) =>
+                      (c?.raw_collection_content || '').includes(slugHex)
+                    );
+                    if (found) {
+                      return {
+                        address: found.address,
+                        name: fragMeta.name || name,
+                        floorTon: 0,
+                        items: found.next_item_index || 0,
+                      };
+                    }
+                  }
+                }
+              }
+            } catch {}
+
+            // Метод 3: TonAPI — поиск по имени в metadata
+            try {
+              for (let offset = 0; offset < 300; offset += 100) {
+                const resp = await nativeFetch(
+                  `https://tonapi.io/v2/nfts/collections?limit=100&offset=${offset}`,
+                  { headers: { 'Accept': 'application/json' } }
+                );
+                if (!resp.ok) break;
+                const data = await resp.json() as any;
+                const cols: any[] = data?.nft_collections || [];
+                if (cols.length === 0) break;
+                const found = cols.find((c: any) => {
+                  const colName = (c?.metadata?.name || '').toLowerCase();
+                  return colName.includes(nameLower) || nameLower.includes(colName);
+                });
+                if (found) {
+                  return {
+                    address: found.address,
+                    name: found?.metadata?.name || name,
+                    floorTon: 0,
+                    items: found.next_item_index || 0,
+                  };
                 }
               }
             } catch {}
