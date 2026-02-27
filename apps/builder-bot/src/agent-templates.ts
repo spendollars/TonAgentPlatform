@@ -1066,12 +1066,19 @@ async function agent(context) {
     return { error: 'no_collection_configured' };
   }
 
-  // ── Поиск адреса коллекции по имени через GetGems GraphQL API ─────────────
+  // ── Поиск адреса коллекции по имени ──────────────────────────────────────
   async function searchCollectionByName(name) {
+    const TONAPI_KEY = context.config.TONAPI_KEY || process.env.TONAPI_KEY || '';
+    const headers = {
+      'Accept': 'application/json',
+      ...(TONAPI_KEY ? { 'Authorization': 'Bearer ' + TONAPI_KEY } : {}),
+    };
+
+    // Метод 1: GetGems GraphQL search
     try {
-      const query = JSON.stringify({
-        query: \`query SearchCollections($query: String!) {
-          alphaNftCollectionSearch(query: $query, count: 5) {
+      const gqlBody = JSON.stringify({
+        query: \`query {
+          alphaNftCollectionSearch(query: "\${name.replace(/"/g, '').replace(/\\\\/g, '')}", count: 5) {
             items {
               address
               name
@@ -1080,32 +1087,75 @@ async function agent(context) {
               floorPrice
             }
           }
-        }\`,
-        variables: { query: name }
+        }\`
       });
       const resp = await fetch('https://api.getgems.io/graphql', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: query,
+        body: gqlBody,
       });
-      if (!resp.ok) return null;
-      const data = await resp.json();
-      const items = data?.data?.alphaNftCollectionSearch?.items || [];
-      if (items.length === 0) return null;
-      // Берём первый результат (наиболее релевантный)
-      const col = items[0];
-      console.log('🔍 GetGems found: ' + col.name + ' addr=' + col.address);
-      return {
-        address: col.address,
-        name: col.name,
-        items: col.approximateItemsCount || 0,
-        holders: col.approximateHoldersCount || 0,
-        floorTon: col.floorPrice ? parseInt(col.floorPrice) / 1e9 : 0,
-      };
+      if (resp.ok) {
+        const data = await resp.json();
+        const items = data?.data?.alphaNftCollectionSearch?.items || [];
+        if (items.length > 0) {
+          const col = items[0];
+          console.log('🔍 GetGems found: ' + col.name + ' addr=' + col.address);
+          return {
+            address: col.address,
+            name: col.name,
+            items: col.approximateItemsCount || 0,
+            holders: col.approximateHoldersCount || 0,
+            floorTon: col.floorPrice ? parseInt(col.floorPrice) / 1e9 : 0,
+          };
+        }
+      }
     } catch (e) {
-      console.warn('⚠️ GetGems search failed:', e.message);
-      return null;
+      console.warn('⚠️ GetGems GQL search failed:', e.message);
     }
+
+    // Метод 2: TonAPI search (поиск по имени через /v2/nfts/collections)
+    try {
+      const resp = await fetch(
+        'https://tonapi.io/v2/nfts/collections?limit=20',
+        { headers }
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        const cols = data?.nft_collections || [];
+        const nameLower = name.toLowerCase();
+        const found = cols.find(c =>
+          (c?.metadata?.name || '').toLowerCase().includes(nameLower)
+        );
+        if (found) {
+          const addr = found.address;
+          const colName = found?.metadata?.name || name;
+          console.log('🔍 TonAPI found: ' + colName + ' addr=' + addr);
+          return { address: addr, name: colName, items: found.next_item_index || 0, holders: 0, floorTon: 0 };
+        }
+      }
+    } catch (e) {
+      console.warn('⚠️ TonAPI collection search failed:', e.message);
+    }
+
+    // Метод 3: GetGems страница поиска (парсинг HTML)
+    try {
+      const resp = await fetch(
+        'https://getgems.io/nft?query=' + encodeURIComponent(name),
+        { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html' } }
+      );
+      if (resp.ok) {
+        const html = await resp.text();
+        const m = html.match(/\/collection\/(EQ[A-Za-z0-9_\-]{46})/);
+        if (m) {
+          console.log('🔍 GetGems HTML found addr=' + m[1]);
+          return { address: m[1], name: name, items: 0, holders: 0, floorTon: 0 };
+        }
+      }
+    } catch (e) {
+      console.warn('⚠️ GetGems HTML search failed:', e.message);
+    }
+
+    return null;
   }
 
   // ── Получить floor price через TonAPI (сканируем листинги) ────────────────
