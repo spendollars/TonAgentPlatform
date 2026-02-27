@@ -409,68 +409,7 @@ export class PlatformToolExecutor {
       };
     }
 
-    // Проверяем шаблоны
-    const desc = args.description;
-    const matchedTemplate = this.matchTemplate(desc);
-    if (matchedTemplate) {
-      // ── Извлекаем параметры из описания для шаблонов ──────────────────────
-      const extractedConfig: Record<string, string> = {};
-
-      // Для NFT шаблонов — извлекаем название коллекции из описания
-      if (matchedTemplate.id === 'nft-floor-predictor' || matchedTemplate.id === 'nft-floor-monitor') {
-        // Ищем название коллекции в описании (слова с заглавной буквы или в кавычках)
-        const quotedMatch = desc.match(/["«»""]([^"«»""]+)["«»""]/);
-        const capitalMatch = desc.match(/(?:коллекц[а-яё]+\s+|collection\s+|следи за\s+|monitor\s+)([A-ZА-Я][A-Za-zА-Яа-я0-9\s]+?)(?:\s+и|\s+каждый|\s+каждые|\s+every|\s*$)/i);
-        const collectionName = quotedMatch?.[1] || capitalMatch?.[1]?.trim();
-        if (collectionName && collectionName.length > 2 && collectionName.length < 60) {
-          extractedConfig['COLLECTION_NAME'] = collectionName;
-        }
-      }
-
-      const baseConfig = matchedTemplate.triggerConfig.config || {};
-      const triggerConfig = {
-        ...(args.interval_ms
-          ? { ...matchedTemplate.triggerConfig, intervalMs: args.interval_ms }
-          : matchedTemplate.triggerConfig),
-        config: { ...baseConfig, ...extractedConfig },
-      };
-
-      // Имя агента включает название коллекции если извлечена
-      const agentName = args.name ||
-        (extractedConfig['COLLECTION_NAME']
-          ? `${extractedConfig['COLLECTION_NAME']} Price Monitor`
-          : matchedTemplate.name);
-
-      const createResult = await getDBTools().createAgent({
-        userId: this.userId,
-        name: agentName,
-        description: desc,
-        code: matchedTemplate.code,
-        triggerType: args.trigger_type || matchedTemplate.triggerType,
-        triggerConfig,
-        isActive: false,
-      });
-
-      if (!createResult.success) return { success: false, error: createResult.error };
-      trackGeneration(this.userId);
-
-      return {
-        success: true,
-        data: {
-          agentId: createResult.data!.id,
-          name: createResult.data!.name,
-          fromTemplate: true,
-          templateId: matchedTemplate.id,
-          triggerType: args.trigger_type || matchedTemplate.triggerType,
-          triggerConfig,
-          placeholders: matchedTemplate.placeholders,
-          extractedConfig,
-        },
-        summary: `Агент #${createResult.data!.id} "${createResult.data!.name}" создан из шаблона${extractedConfig['COLLECTION_NAME'] ? ` (коллекция: ${extractedConfig['COLLECTION_NAME']})` : ''}`,
-      };
-    }
-
-    // AI-генерация
+    // AI-генерация (всегда — шаблоны только в маркетплейсе для ручного выбора)
     const detected = detectTriggerFromDescription(desc);
     const triggerType = args.trigger_type || detected.triggerType;
     const triggerConfig = args.interval_ms
