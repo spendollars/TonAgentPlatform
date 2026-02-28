@@ -227,12 +227,26 @@ function sanitize(text: string): string {
 // ============================================================
 const bot = new Telegraf(process.env.BOT_TOKEN || '');
 
+// Статичное меню (русский по умолчанию)
 const MAIN_MENU = Markup.keyboard([
   ['🤖 Мои агенты', '➕ Создать агента'],
   ['🏪 Маркетплейс', '🔌 Плагины', '⚡ Workflow'],
   ['💎 TON Connect', '💳 Подписка', '📊 Статистика'],
   ['👤 Профиль', '❓ Помощь'],
 ]).resize();
+
+// Динамическое меню с учётом языка
+function getMainMenu(lang: 'ru' | 'en') {
+  if (lang === 'en') {
+    return Markup.keyboard([
+      ['🤖 My Agents', '➕ Create Agent'],
+      ['🏪 Marketplace', '🔌 Plugins', '⚡ Workflow'],
+      ['💎 TON Connect', '💳 Subscription', '📊 Stats'],
+      ['👤 Profile', '❓ Help'],
+    ]).resize();
+  }
+  return MAIN_MENU;
+}
 
 // ============================================================
 // Хранилище агентских кошельков (in-memory, будет в БД позже)
@@ -516,7 +530,7 @@ async function showWelcome(ctx: Context, userId: number, name: string, lang: 'ru
       `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
       `${pe('bolt')} Agent auto-starts within 30 seconds`;
 
-  await safeReply(ctx, text, { ...MAIN_MENU, parse_mode: 'HTML' });
+  await safeReply(ctx, text, { ...getMainMenu(lang), parse_mode: 'HTML' });
   await ctx.reply(
     lang === 'ru' ? `${peb('finger')} Или выберите действие:` : `${peb('finger')} Or choose an action:`,
     {
@@ -1114,22 +1128,22 @@ bot.command('create', async (ctx) => {
 // ============================================================
 // Нижнее меню (кнопки)
 // ============================================================
+// ── Русские кнопки клавиатуры ──
 bot.hears('🤖 Мои агенты', (ctx) => showAgentsList(ctx, ctx.from.id));
-bot.hears('➕ Создать агента', (ctx) =>
-  safeReply(ctx,
-    `✨ *Создание агента*\n\n` +
-    `Опишите задачу своими словами — AI сам напишет код\n` +
-    `и запустит агента на нашем сервере\\.\n\n` +
-    `*Примеры задач:*\n` +
-    `💎 _"Проверяй баланс UQB5\\.\\.\\. каждый час"_\n` +
-    `📈 _"Следи за ценой TON, уведоми если выше 5\\$"_\n` +
-    `💸 _"Каждое 10\\-е число отправляй 100 TON на UQ\\.\\.\\."_\n` +
-    `🌐 _"Проверяй доступность сайта каждые 5 минут"_\n` +
-    `📊 _"Получай курс BTC каждое утро в 9:00"_\n\n` +
-    `👇 *Напишите вашу задачу:*`,
-    MAIN_MENU
-  )
-);
+bot.hears('➕ Создать агента', (ctx) => {
+  const lang = getUserLang(ctx.from.id);
+  return safeReply(ctx,
+    `${pe('sparkles')} <b>${lang === 'ru' ? 'Создание агента' : 'Create Agent'}</b>\n\n` +
+    `${lang === 'ru' ? 'Опишите задачу своими словами — AI сам напишет код и запустит агента на нашем сервере.' : 'Describe your task in plain words — AI will write the code and run the agent on our server.'}\n\n` +
+    `<b>${lang === 'ru' ? 'Примеры задач:' : 'Task examples:'}</b>\n` +
+    `${pe('diamond')} <i>"${lang === 'ru' ? 'Проверяй баланс UQB5... каждый час' : 'Check balance UQB5... every hour'}"</i>\n` +
+    `${pe('trending')} <i>"${lang === 'ru' ? 'Следи за ценой TON, уведоми если выше $5' : 'Monitor TON price, alert if above $5'}"</i>\n` +
+    `${pe('money')} <i>"${lang === 'ru' ? 'Каждое 10-е число отправляй 100 TON на UQ...' : 'Send 100 TON to UQ... on the 10th of each month'}"</i>\n` +
+    `${pe('globe')} <i>"${lang === 'ru' ? 'Проверяй доступность сайта каждые 5 минут' : 'Check website availability every 5 minutes'}"</i>\n\n` +
+    `${pe('finger')} <b>${lang === 'ru' ? 'Напишите вашу задачу:' : 'Type your task:'}</b>`,
+    { ...getMainMenu(lang), parse_mode: 'HTML' }
+  );
+});
 bot.hears('🏪 Маркетплейс', (ctx) => showMarketplace(ctx));
 bot.hears('🔌 Плагины', (ctx) => showPlugins(ctx));
 bot.hears('⚡ Workflow', (ctx) => showWorkflows(ctx, ctx.from.id));
@@ -1137,6 +1151,29 @@ bot.hears('💎 TON Connect', (ctx) => showTonConnect(ctx));
 bot.hears('💳 Подписка', (ctx) => showSubscription(ctx));
 bot.hears('📊 Статистика', (ctx) => showStats(ctx, ctx.from.id));
 bot.hears('❓ Помощь', (ctx) => showHelp(ctx));
+// ── Английские кнопки клавиатуры ──
+bot.hears('🤖 My Agents', (ctx) => showAgentsList(ctx, ctx.from.id));
+bot.hears('➕ Create Agent', (ctx) => {
+  const lang = getUserLang(ctx.from.id);
+  return safeReply(ctx,
+    `${pe('sparkles')} <b>Create Agent</b>\n\n` +
+    `Describe your task in plain words — AI will write the code and run the agent on our server.\n\n` +
+    `<b>Task examples:</b>\n` +
+    `${pe('diamond')} <i>"Check balance UQB5... every hour"</i>\n` +
+    `${pe('trending')} <i>"Monitor TON price, alert if above $5"</i>\n` +
+    `${pe('money')} <i>"Send 100 TON to UQ... on the 10th of each month"</i>\n` +
+    `${pe('globe')} <i>"Check website availability every 5 minutes"</i>\n\n` +
+    `${pe('finger')} <b>Type your task:</b>`,
+    { ...getMainMenu(lang), parse_mode: 'HTML' }
+  );
+});
+bot.hears('🏪 Marketplace', (ctx) => showMarketplace(ctx));
+bot.hears('🔌 Plugins', (ctx) => showPlugins(ctx));
+bot.hears('💎 TON Connect', (ctx) => showTonConnect(ctx));  // same
+bot.hears('💳 Subscription', (ctx) => showSubscription(ctx));
+bot.hears('📊 Stats', (ctx) => showStats(ctx, ctx.from.id));
+bot.hears('❓ Help', (ctx) => showHelp(ctx));
+bot.hears('👤 Profile', async (ctx) => showProfile(ctx, ctx.from.id));
 // ── Выбор языка (callback при первом /start) ──
 bot.action(/^setlang_(ru|en)$/, async (ctx) => {
   await ctx.answerCbQuery();
@@ -3017,16 +3054,21 @@ async function showAgentsList(ctx: Context, userId: number) {
 // ============================================================
 async function showAgentMenu(ctx: Context, agentId: number, userId: number) {
   try {
+    const lang = getUserLang(userId);
     const r = await getDBTools().getAgent(agentId, userId);
-    if (!r.success || !r.data) { await ctx.reply('❌ Агент не найден'); return; }
+    if (!r.success || !r.data) { await ctx.reply('❌ ' + (lang === 'ru' ? 'Агент не найден' : 'Agent not found')); return; }
     const a = r.data;
-    const name = (a.name || '').replace(/[*_`[\]]/g, '').slice(0, 40);
-    const desc = (a.description || '').replace(/[*_`[\]]/g, '').slice(0, 120);
-    const statusIcon = a.isActive ? '🟢' : '⏸';
-    const statusText = a.isActive ? 'Активен' : 'На паузе';
-    const triggerIcon = a.triggerType === 'scheduled' ? '⏰' : a.triggerType === 'webhook' ? '🔗' : '▶️';
-    const triggerText = a.triggerType === 'scheduled' ? 'По расписанию' :
-                        a.triggerType === 'webhook' ? 'Webhook' : 'Вручную';
+    const name = escHtml((a.name || '').slice(0, 40));
+    const desc = escHtml((a.description || '').slice(0, 120));
+    const statusIcon = a.isActive ? pe('green') : '⏸';
+    const statusText = a.isActive
+      ? (lang === 'ru' ? 'Активен' : 'Active')
+      : (lang === 'ru' ? 'На паузе' : 'Paused');
+    const triggerIcon = a.triggerType === 'scheduled' ? pe('calendar') : a.triggerType === 'webhook' ? pe('link') : pe('bolt');
+    const triggerText = a.triggerType === 'scheduled'
+      ? (lang === 'ru' ? 'По расписанию' : 'Scheduled')
+      : a.triggerType === 'webhook' ? 'Webhook'
+      : (lang === 'ru' ? 'Вручную' : 'Manual');
 
     const lastErr = agentLastErrors.get(agentId);
     const hasError = !!lastErr;
@@ -3036,53 +3078,57 @@ async function showAgentMenu(ctx: Context, agentId: number, userId: number) {
     const intervalMs = triggerCfg?.intervalMs ? Number(triggerCfg.intervalMs) : 0;
     let intervalLabel = '';
     if (a.triggerType === 'scheduled' && intervalMs > 0) {
-      if (intervalMs < 60000) intervalLabel = ' · каждую минуту';
-      else if (intervalMs < 3600000) intervalLabel = ` · каждые ${Math.round(intervalMs / 60000)} мин`;
-      else if (intervalMs < 86400000) intervalLabel = ' · каждый час';
-      else intervalLabel = ` · раз в ${Math.round(intervalMs / 86400000)} д`;
+      if (intervalMs < 60000) intervalLabel = lang === 'ru' ? ' · каждую минуту' : ' · every minute';
+      else if (intervalMs < 3600000) intervalLabel = lang === 'ru' ? ` · каждые ${Math.round(intervalMs / 60000)} мин` : ` · every ${Math.round(intervalMs / 60000)} min`;
+      else if (intervalMs < 86400000) intervalLabel = lang === 'ru' ? ' · каждый час' : ' · every hour';
+      else intervalLabel = lang === 'ru' ? ` · раз в ${Math.round(intervalMs / 86400000)} д` : ` · every ${Math.round(intervalMs / 86400000)} d`;
     }
 
     // Дата создания
     const createdAt = a.createdAt ? new Date(a.createdAt) : null;
     const daysAgo = createdAt ? Math.floor((Date.now() - createdAt.getTime()) / 86400000) : -1;
-    const dateLabel = daysAgo < 0 ? '' : daysAgo === 0 ? 'сегодня' : daysAgo === 1 ? 'вчера' : `${daysAgo}д назад`;
+    const dateLabel = daysAgo < 0 ? '' : daysAgo === 0
+      ? (lang === 'ru' ? 'сегодня' : 'today')
+      : daysAgo === 1
+      ? (lang === 'ru' ? 'вчера' : 'yesterday')
+      : lang === 'ru' ? `${daysAgo}д назад` : `${daysAgo}d ago`;
 
     const text =
-      `${statusIcon} *${esc(name)}*  \\#${esc(String(a.id))}\n` +
+      `${statusIcon} <b>${name}</b>  #${a.id}\n` +
       `━━━━━━━━━━━━━━━━━━━━\n` +
-      `Статус: *${esc(statusText)}*\n` +
-      `${triggerIcon} ${esc(triggerText + intervalLabel)}\n` +
-      (dateLabel ? `📅 Создан: _${esc(dateLabel)}_\n` : '') +
-      (hasError ? `\n⚠️ *Последняя ошибка:*\n\`${esc(lastErr!.error.slice(0, 120))}\`` : '') +
-      (desc ? `\n_${esc(desc)}_` : '');
+      `${lang === 'ru' ? 'Статус' : 'Status'}: <b>${statusText}</b>\n` +
+      `${triggerIcon} ${escHtml(triggerText + intervalLabel)}\n` +
+      (dateLabel ? `${pe('calendar')} ${lang === 'ru' ? 'Создан' : 'Created'}: <i>${dateLabel}</i>\n` : '') +
+      (hasError ? `\n⚠️ <b>${lang === 'ru' ? 'Последняя ошибка:' : 'Last error:'}</b>\n<code>${escHtml(lastErr!.error.slice(0, 120))}</code>` : '') +
+      (desc ? `\n<i>${desc}</i>` : '');
 
     const keyboard: any[][] = [
       [
-        { text: a.isActive ? '⏸ Остановить' : '🚀 Запустить', callback_data: `run_agent:${agentId}` },
-        { text: '📋 Логи', callback_data: `show_logs:${agentId}` },
+        { text: a.isActive ? `⏸ ${lang === 'ru' ? 'Остановить' : 'Stop'}` : `${peb('rocket')} ${lang === 'ru' ? 'Запустить' : 'Start'}`, callback_data: `run_agent:${agentId}` },
+        { text: `${peb('clipboard')} ${lang === 'ru' ? 'Логи' : 'Logs'}`, callback_data: `show_logs:${agentId}` },
       ],
     ];
 
     if (hasError) {
-      keyboard.push([{ text: '🔧 AI Автопочинка', callback_data: `auto_repair:${agentId}` }]);
+      keyboard.push([{ text: `${peb('wrench')} AI ${lang === 'ru' ? 'Автопочинка' : 'Auto-repair'}`, callback_data: `auto_repair:${agentId}` }]);
     }
 
     keyboard.push([
-      { text: '👁 Код', callback_data: `show_code:${agentId}` },
-      { text: '🔍 Аудит', callback_data: `audit_agent:${agentId}` },
+      { text: `👁 ${lang === 'ru' ? 'Код' : 'Code'}`, callback_data: `show_code:${agentId}` },
+      { text: `🔍 ${lang === 'ru' ? 'Аудит' : 'Audit'}`, callback_data: `audit_agent:${agentId}` },
     ]);
     keyboard.push([
-      { text: '✏️ Изменить', callback_data: `edit_agent:${agentId}` },
-      { text: '🏷 Переименовать', callback_data: `rename_agent:${agentId}` },
+      { text: `✏️ ${lang === 'ru' ? 'Изменить' : 'Edit'}`, callback_data: `edit_agent:${agentId}` },
+      { text: `🏷 ${lang === 'ru' ? 'Переименовать' : 'Rename'}`, callback_data: `rename_agent:${agentId}` },
     ]);
     keyboard.push([
-      { text: '🗑 Удалить', callback_data: `delete_agent:${agentId}` },
-      { text: '◀️ Все агенты', callback_data: 'list_agents' },
+      { text: `🗑 ${lang === 'ru' ? 'Удалить' : 'Delete'}`, callback_data: `delete_agent:${agentId}` },
+      { text: `${peb('back')} ${lang === 'ru' ? 'Все агенты' : 'All agents'}`, callback_data: 'list_agents' },
     ]);
 
-    await editOrReply(ctx, text, { reply_markup: { inline_keyboard: keyboard } });
+    await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } });
   } catch (err) {
-    await ctx.reply('❌ Ошибка загрузки агента');
+    await ctx.reply('❌ ' + 'Error loading agent');
   }
 }
 
@@ -3091,6 +3137,7 @@ async function showAgentMenu(ctx: Context, agentId: number, userId: number) {
 // ============================================================
 async function showTonConnect(ctx: Context) {
   const userId = ctx.from!.id;
+  const lang = getUserLang(userId);
   const tonConn = getTonConnectManager();
 
   if (tonConn.isConnected(userId)) {
@@ -3098,19 +3145,20 @@ async function showTonConnect(ctx: Context) {
     const wallet = tonConn.getWallet(userId)!;
     const bal = await tonConn.getBalance(userId);
     await safeReply(ctx,
-      `💎 *TON Connect*\n\n` +
-      `✅ Кошелёк подключён\n` +
-      `👛 ${esc(wallet.walletName)}\n` +
-      `📋 Адрес: \`${esc(wallet.friendlyAddress)}\`\n` +
-      `💰 Баланс: *${esc(bal.ton)}* TON\n\n` +
-      `Что хотите сделать?`,
+      `${pe('diamond')} <b>TON Connect</b>\n\n` +
+      `${pe('check')} ${lang === 'ru' ? 'Кошелёк подключён' : 'Wallet connected'}\n` +
+      `${pe('wallet')} ${escHtml(wallet.walletName)}\n` +
+      `${pe('link')} ${lang === 'ru' ? 'Адрес' : 'Address'}: <code>${escHtml(wallet.friendlyAddress)}</code>\n` +
+      `${pe('coin')} ${lang === 'ru' ? 'Баланс' : 'Balance'}: <b>${escHtml(bal.ton)}</b> TON\n\n` +
+      `${lang === 'ru' ? 'Что хотите сделать?' : 'What would you like to do?'}`,
       {
+        parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
-            [{ text: '🔄 Обновить баланс', callback_data: 'ton_refresh' }],
-            [{ text: '💸 Отправить TON', callback_data: 'ton_send' }],
-            [{ text: '📋 История транзакций', callback_data: 'ton_history' }],
-            [{ text: '🔌 Отключить кошелёк', callback_data: 'ton_disconnect' }],
+            [{ text: `${peb('refresh')} ${lang === 'ru' ? 'Обновить баланс' : 'Refresh balance'}`, callback_data: 'ton_refresh' }],
+            [{ text: `${peb('money')} ${lang === 'ru' ? 'Отправить TON' : 'Send TON'}`, callback_data: 'ton_send' }],
+            [{ text: `${peb('clipboard')} ${lang === 'ru' ? 'История транзакций' : 'Transaction history'}`, callback_data: 'ton_history' }],
+            [{ text: `${peb('plugin')} ${lang === 'ru' ? 'Отключить кошелёк' : 'Disconnect wallet'}`, callback_data: 'ton_disconnect' }],
           ],
         },
       }
@@ -3823,6 +3871,7 @@ async function createWorkflowFromTemplate(ctx: Context, userId: number, idx: num
 // Статистика
 // ============================================================
 async function showStats(ctx: Context, userId: number) {
+  const lang = getUserLang(userId);
   const r = await getDBTools().getUserAgents(userId);
   const agents = r.data || [];
   const active = agents.filter(a => a.isActive).length;
@@ -3838,46 +3887,46 @@ async function showStats(ctx: Context, userId: number) {
   const modelInfo = MODEL_LIST.find(m => m.id === currentModel);
 
   let text =
-    `📊 *Ваша панель управления*\n\n` +
-    `━━━ 🤖 Агенты ━━━\n` +
-    `Всего: *${esc(agents.length)}* · Активных: *${esc(active)}* · По расписанию: *${esc(scheduled)}*\n\n` +
-    `━━━ 💎 TON ━━━\n`;
+    `${pe('chart')} <b>${lang === 'ru' ? 'Ваша панель управления' : 'Your Dashboard'}</b>\n\n` +
+    `━━━ ${pe('robot')} ${lang === 'ru' ? 'Агенты' : 'Agents'} ━━━\n` +
+    `${lang === 'ru' ? 'Всего' : 'Total'}: <b>${agents.length}</b> · ${lang === 'ru' ? 'Активных' : 'Active'}: <b>${active}</b> · ${lang === 'ru' ? 'По расписанию' : 'Scheduled'}: <b>${scheduled}</b>\n\n` +
+    `━━━ ${pe('diamond')} TON ━━━\n`;
 
   if (isConnected && wallet) {
-    text += `TON Connect: ✅ ${esc(wallet.walletName)}\n`;
-    text += `Адрес: \`${esc(wallet.friendlyAddress)}\`\n`;
+    text += `TON Connect: ${pe('check')} ${escHtml(wallet.walletName)}\n`;
+    text += `${lang === 'ru' ? 'Адрес' : 'Address'}: <code>${escHtml(wallet.friendlyAddress)}</code>\n`;
   } else {
-    text += `TON Connect: ❌ не подключён\n`;
+    text += `TON Connect: ❌ ${lang === 'ru' ? 'не подключён' : 'not connected'}\n`;
   }
 
   if (agentBalance !== null) {
-    text += `Агентский кошелёк: *${esc(agentBalance.toFixed(4))}* TON\n`;
+    text += `${lang === 'ru' ? 'Агентский кошелёк' : 'Agent wallet'}: <b>${agentBalance.toFixed(4)}</b> TON\n`;
   }
 
   text +=
-    `\n━━━ 🧠 AI ━━━\n` +
-    `Модель: ${esc(modelInfo?.icon || '')} *${esc(modelInfo?.label || currentModel)}*\n` +
-    `Авто\\-fallback: ✅ включён\n\n` +
-    `━━━ 🔌 Плагины ━━━\n` +
-    `Доступно: *${esc(pluginStats.total)}* · Установлено: *${esc(pluginStats.installed)}*`;
+    `\n━━━ ${pe('brain')} AI ━━━\n` +
+    `${lang === 'ru' ? 'Модель' : 'Model'}: ${escHtml(modelInfo?.icon || '')} <b>${escHtml(modelInfo?.label || currentModel)}</b>\n` +
+    `${lang === 'ru' ? 'Авто-fallback' : 'Auto-fallback'}: ${pe('check')} ${lang === 'ru' ? 'включён' : 'enabled'}\n\n` +
+    `━━━ ${pe('plugin')} ${lang === 'ru' ? 'Плагины' : 'Plugins'} ━━━\n` +
+    `${lang === 'ru' ? 'Доступно' : 'Available'}: <b>${pluginStats.total}</b> · ${lang === 'ru' ? 'Установлено' : 'Installed'}: <b>${pluginStats.installed}</b>`;
 
   const keyboard: any[][] = [
     [
-      { text: '🤖 Мои агенты', callback_data: 'list_agents' },
-      { text: '🧠 Сменить модель', callback_data: 'model_selector' },
+      { text: `${peb('robot')} ${lang === 'ru' ? 'Мои агенты' : 'My agents'}`, callback_data: 'list_agents' },
+      { text: `${peb('brain')} ${lang === 'ru' ? 'Сменить модель' : 'Change model'}`, callback_data: 'model_selector' },
     ],
   ];
   if (isConnected) {
-    keyboard.push([{ text: '💎 TON кошелёк', callback_data: 'ton_connect' }]);
+    keyboard.push([{ text: `${peb('diamond')} ${lang === 'ru' ? 'TON кошелёк' : 'TON wallet'}`, callback_data: 'ton_connect' }]);
   } else {
-    keyboard.push([{ text: '💎 Подключить TON', callback_data: 'ton_connect' }]);
+    keyboard.push([{ text: `${peb('diamond')} ${lang === 'ru' ? 'Подключить TON' : 'Connect TON'}`, callback_data: 'ton_connect' }]);
   }
-  keyboard.push([{ text: '🌐 Открыть дашборд', url: 'https://tonagentplatform.ru/dashboard.html' }]);
+  keyboard.push([{ text: `${peb('globe')} ${lang === 'ru' ? 'Открыть дашборд' : 'Open dashboard'}`, url: 'https://tonagentplatform.ru/dashboard.html' }]);
   if (isOwner) {
-    keyboard.push([{ text: '⚙️ Настройки платформы', callback_data: 'platform_settings' }]);
+    keyboard.push([{ text: `⚙️ ${lang === 'ru' ? 'Настройки платформы' : 'Platform settings'}`, callback_data: 'platform_settings' }]);
   }
 
-  await editOrReply(ctx, text, { reply_markup: { inline_keyboard: keyboard } });
+  await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } });
 }
 
 // ============================================================
@@ -3885,22 +3934,23 @@ async function showStats(ctx: Context, userId: number) {
 // ============================================================
 async function showModelSelector(ctx: Context) {
   const userId = ctx.from!.id;
+  const lang = getUserLang(userId);
   const current = getUserModel(userId);
   const currentInfo = MODEL_LIST.find(m => m.id === current);
 
   let text =
-    `🧠 *Выбор AI модели*\n\n` +
-    `Активная: ${esc(currentInfo?.icon || '')} *${esc(currentInfo?.label || current)}*\n\n` +
-    `При недоступности — бот автоматически пробует следующую модель в цепочке\\.\n\n` +
-    `*Доступные модели:*\n`;
+    `${pe('brain')} <b>${lang === 'ru' ? 'Выбор AI модели' : 'Choose AI Model'}</b>\n\n` +
+    `${lang === 'ru' ? 'Активная' : 'Active'}: ${escHtml(currentInfo?.icon || '')} <b>${escHtml(currentInfo?.label || current)}</b>\n\n` +
+    `${lang === 'ru' ? 'При недоступности — бот автоматически пробует следующую модель в цепочке.' : 'If unavailable — bot automatically tries the next model in the chain.'}\n\n` +
+    `<b>${lang === 'ru' ? 'Доступные модели:' : 'Available models:'}</b>\n`;
 
   MODEL_LIST.forEach(m => {
     const isCurrent = m.id === current;
     const tags: string[] = [];
-    if ((m as any).recommended) tags.push('⭐ рекомендована');
-    if ((m as any).fast) tags.push('⚡ быстрая');
-    const tagStr = tags.length ? ` — _${esc(tags.join(', '))}_` : '';
-    text += `${isCurrent ? '▶️' : '  '} ${m.icon} ${esc(m.label)}${esc(isCurrent ? ' ✅' : '')}${tagStr}\n`;
+    if ((m as any).recommended) tags.push(lang === 'ru' ? '⭐ рекомендована' : '⭐ recommended');
+    if ((m as any).fast) tags.push(lang === 'ru' ? '⚡ быстрая' : '⚡ fast');
+    const tagStr = tags.length ? ` — <i>${escHtml(tags.join(', '))}</i>` : '';
+    text += `${isCurrent ? '▶️' : '  '} ${escHtml(m.icon)} ${escHtml(m.label)}${isCurrent ? ' ✅' : ''}${tagStr}\n`;
   });
 
   const btns = MODEL_LIST.map(m => [{
@@ -3908,7 +3958,7 @@ async function showModelSelector(ctx: Context) {
     callback_data: `set_model:${m.id}`,
   }]);
 
-  await editOrReply(ctx, text, { reply_markup: { inline_keyboard: btns } });
+  await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: btns } });
 }
 
 // ============================================================
@@ -3917,47 +3967,48 @@ async function showModelSelector(ctx: Context) {
 
 async function showSubscription(ctx: Context) {
   const userId = ctx.from!.id;
+  const lang = getUserLang(userId);
   const sub = await getUserSubscription(userId);
   const plan = PLANS[sub.planId] || PLANS.free;
   const isOwner = userId === OWNER_ID_NUM;
 
   let text =
-    `💳 *Подписка*\n\n` +
-    `Текущий план: ${formatSubscription(sub)}\n\n` +
-    `━━━ ${plan.icon} ${esc(plan.name)} ━━━\n`;
+    `${pe('card')} <b>${lang === 'ru' ? 'Подписка' : 'Subscription'}</b>\n\n` +
+    `${lang === 'ru' ? 'Текущий план' : 'Current plan'}: ${escHtml(formatSubscription(sub))}\n\n` +
+    `━━━ ${escHtml(plan.icon)} ${escHtml(plan.name)} ━━━\n`;
 
-  plan.features.forEach(f => { text += `✅ ${esc(f)}\n`; });
+  plan.features.forEach(f => { text += `${pe('check')} ${escHtml(f)}\n`; });
 
   // Показываем использование генераций
   const genUsed = getGenerationsUsed(userId);
   const genLimit = plan.generationsPerMonth === -1 ? '∞' : String(plan.generationsPerMonth);
-  text += `\n⚡ Генерации AI: *${esc(genUsed)}/${esc(genLimit)}* в этом месяце\n`;
+  text += `\n${pe('bolt')} ${lang === 'ru' ? 'Генерации AI' : 'AI generations'}: <b>${genUsed}/${genLimit}</b> ${lang === 'ru' ? 'в этом месяце' : 'this month'}\n`;
   if (plan.pricePerGeneration > 0) {
-    text += `💸 Цена за генерацию: *${esc(plan.pricePerGeneration)} TON*\n`;
+    text += `${pe('money')} ${lang === 'ru' ? 'Цена за генерацию' : 'Price per generation'}: <b>${plan.pricePerGeneration} TON</b>\n`;
   }
 
   if (!isOwner && plan.id === 'free') {
     text +=
-      `\n💡 *Upgrade для большего:*\n` +
-      `• До 100 агентов одновременно\n` +
-      `• Включённые генерации AI/мес\n` +
-      `• Расписание + Webhook + Workflow\n` +
-      `• API доступ`;
+      `\n${pe('sparkles')} <b>${lang === 'ru' ? 'Upgrade для большего:' : 'Upgrade for more:'}</b>\n` +
+      `• ${lang === 'ru' ? 'До 100 агентов одновременно' : 'Up to 100 agents'}\n` +
+      `• ${lang === 'ru' ? 'Включённые генерации AI/мес' : 'Included AI generations/month'}\n` +
+      `• ${lang === 'ru' ? 'Расписание + Webhook + Workflow' : 'Schedule + Webhook + Workflow'}\n` +
+      `• ${lang === 'ru' ? 'API доступ' : 'API access'}`;
   } else if (!isOwner && sub.expiresAt) {
     const days = Math.ceil((sub.expiresAt.getTime() - Date.now()) / 86400000);
-    text += `\n⏳ Истекает через *${esc(days)}* дн\\.`;
+    text += `\n${pe('hourglass')} ${lang === 'ru' ? 'Истекает через' : 'Expires in'} <b>${days}</b> ${lang === 'ru' ? 'дн.' : 'days'}`;
   }
 
   const btns: any[][] = [];
   if (!isOwner) {
-    btns.push([{ text: '🚀 Улучшить план', callback_data: 'plans_menu' }]);
+    btns.push([{ text: `${peb('rocket')} ${lang === 'ru' ? 'Улучшить план' : 'Upgrade plan'}`, callback_data: 'plans_menu' }]);
   }
   btns.push([
-    { text: '🤖 Мои агенты', callback_data: 'list_agents' },
-    { text: '💎 TON Connect', callback_data: 'ton_connect' },
+    { text: `${peb('robot')} ${lang === 'ru' ? 'Мои агенты' : 'My agents'}`, callback_data: 'list_agents' },
+    { text: `${peb('diamond')} TON Connect`, callback_data: 'ton_connect' },
   ]);
 
-  await safeReply(ctx, text, { reply_markup: { inline_keyboard: btns } });
+  await safeReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: btns } });
 }
 
 async function showPlans(ctx: Context) {
@@ -4093,44 +4144,70 @@ async function checkPaymentStatus(ctx: Context) {
 // Помощь
 // ============================================================
 async function showHelp(ctx: Context) {
-  const text =
-    `❓ *TON Agent Platform — Справка*\n\n` +
-    `━━━ 🚀 Как создать агента ━━━\n\n` +
-    `Просто напишите задачу своими словами:\n` +
-    `_"проверяй баланс кошелька UQ\\.\\.\\. каждый час"_\n` +
-    `_"следи за ценой TON, уведоми если выше 5\\$"_\n` +
-    `_"каждое 10\\-е число отправляй 50 TON на UQ\\.\\.\\."_\n\n` +
-    `Агент создаётся автоматически и запускается на нашем сервере — *ничего устанавливать не нужно*\\.\n\n` +
-    `━━━ 📋 Команды ━━━\n\n` +
-    `/start — главное меню\n` +
-    `/list — мои агенты\n` +
-    `/run ID — запустить агента \\(пример: /run 3\\)\n` +
-    `/config — мои переменные \\(ключи, адреса\\)\n` +
-    `/model — выбрать AI модель\n` +
-    `/sub — моя подписка\n` +
-    `/plans — тарифы и оплата\n` +
-    `/connect — подключить TON кошелёк \\(Tonkeeper\\)\n` +
-    `/wallet — агентский кошелёк \\(без мобильного приложения\\)\n` +
-    `/marketplace — готовые шаблоны агентов\n\n` +
-    `━━━ 💡 Что умеют агенты ━━━\n\n` +
-    `• Работать с *любыми* публичными API\n` +
-    `• Мониторить TON\\-кошельки и цены\n` +
-    `• Отправлять TON по расписанию\n` +
-    `• Делать запросы к DEX \\(DeDust, STON\\.fi\\)\n` +
-    `• Уведомлять вас в Telegram`;
+  const lang = getUserLang(ctx.from?.id || 0);
+  const text = lang === 'ru'
+    ? `${pe('question')} <b>TON Agent Platform — Справка</b>\n\n` +
+      `━━━ ${pe('rocket')} Как создать агента ━━━\n\n` +
+      `Просто напишите задачу своими словами:\n` +
+      `<i>"проверяй баланс кошелька UQ... каждый час"</i>\n` +
+      `<i>"следи за ценой TON, уведоми если выше $5"</i>\n` +
+      `<i>"каждое 10-е число отправляй 50 TON на UQ..."</i>\n\n` +
+      `Агент создаётся автоматически и запускается на нашем сервере — <b>ничего устанавливать не нужно</b>.\n\n` +
+      `━━━ ${pe('clipboard')} Команды ━━━\n\n` +
+      `/start — главное меню\n` +
+      `/list — мои агенты\n` +
+      `/run ID — запустить агента (пример: /run 3)\n` +
+      `/config — мои переменные (ключи, адреса)\n` +
+      `/model — выбрать AI модель\n` +
+      `/sub — моя подписка\n` +
+      `/plans — тарифы и оплата\n` +
+      `/connect — подключить TON кошелёк (Tonkeeper)\n` +
+      `/wallet — агентский кошелёк (без мобильного приложения)\n` +
+      `/marketplace — готовые шаблоны агентов\n\n` +
+      `━━━ ${pe('sparkles')} Что умеют агенты ━━━\n\n` +
+      `• Работать с <b>любыми</b> публичными API\n` +
+      `• Мониторить TON-кошельки и цены\n` +
+      `• Отправлять TON по расписанию\n` +
+      `• Делать запросы к DEX (DeDust, STON.fi)\n` +
+      `• Уведомлять вас в Telegram`
+    : `${pe('question')} <b>TON Agent Platform — Help</b>\n\n` +
+      `━━━ ${pe('rocket')} How to create an agent ━━━\n\n` +
+      `Just describe your task in plain words:\n` +
+      `<i>"check wallet balance UQ... every hour"</i>\n` +
+      `<i>"monitor TON price, alert if above $5"</i>\n` +
+      `<i>"send 50 TON to UQ... on the 10th of each month"</i>\n\n` +
+      `Agent is created automatically and runs on our server — <b>nothing to install</b>.\n\n` +
+      `━━━ ${pe('clipboard')} Commands ━━━\n\n` +
+      `/start — main menu\n` +
+      `/list — my agents\n` +
+      `/run ID — run agent (example: /run 3)\n` +
+      `/config — my variables (keys, addresses)\n` +
+      `/model — choose AI model\n` +
+      `/sub — my subscription\n` +
+      `/plans — pricing\n` +
+      `/connect — connect TON wallet (Tonkeeper)\n` +
+      `/wallet — agent wallet (no mobile app needed)\n` +
+      `/marketplace — ready-made agent templates\n\n` +
+      `━━━ ${pe('sparkles')} What agents can do ━━━\n\n` +
+      `• Work with <b>any</b> public API\n` +
+      `• Monitor TON wallets and prices\n` +
+      `• Send TON on schedule\n` +
+      `• Query DEX (DeDust, STON.fi)\n` +
+      `• Notify you in Telegram`;
 
   await safeReply(ctx, text, {
+    parse_mode: 'HTML',
     reply_markup: {
       inline_keyboard: [
         [
-          { text: '🏪 Маркетплейс', callback_data: 'marketplace' },
-          { text: '🤖 Мои агенты', callback_data: 'list_agents' },
+          { text: `${peb('store')} ${lang === 'ru' ? 'Маркетплейс' : 'Marketplace'}`, callback_data: 'marketplace' },
+          { text: `${peb('robot')} ${lang === 'ru' ? 'Мои агенты' : 'My agents'}`, callback_data: 'list_agents' },
         ],
         [
-          { text: '🧠 AI модель', callback_data: 'model_selector' },
-          { text: '💎 TON кошелёк', callback_data: 'ton_connect' },
+          { text: `${peb('brain')} ${lang === 'ru' ? 'AI модель' : 'AI model'}`, callback_data: 'model_selector' },
+          { text: `${peb('diamond')} TON ${lang === 'ru' ? 'кошелёк' : 'wallet'}`, callback_data: 'ton_connect' },
         ],
-        [{ text: '🌐 Открыть дашборд', url: 'https://tonagentplatform.ru/dashboard.html' }],
+        [{ text: `${peb('globe')} ${lang === 'ru' ? 'Открыть дашборд' : 'Open dashboard'}`, url: 'https://tonagentplatform.ru/dashboard.html' }],
       ],
     },
   });
