@@ -1,7 +1,7 @@
 /**
  * Premium Emoji — кастомные анимированные эмодзи для TON Agent Platform
  *
- * Использование в сообщениях (MarkdownV2):
+ * Использование в сообщениях (HTML parse mode):
  *   pe('robot')  →  <tg-emoji emoji-id="6030400221232501136">🤖</tg-emoji>
  *
  * Использование в тексте кнопок:
@@ -12,6 +12,8 @@
 
 // ── Карта ID премиум эмодзи ────────────────────────────────────────────────
 export const PREMIUM_EMOJI_IDS: Record<string, { id: string; fallback: string }> = {
+  // Специальный разделитель (премиум анимированный)
+  divider:  { id: '5217516491540305835', fallback: '〰️' },
   robot:    { id: '6030400221232501136', fallback: '🤖' },
   plus:     { id: '5882207227997066107', fallback: '➕' },
   store:    { id: '5920332557466997677', fallback: '🏪' },
@@ -78,4 +80,20 @@ export function escHtml(text: string | number | null | undefined): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/**
+ * Генерирует строку-разделитель с премиум эмодзи (для HTML parse mode)
+ * Использование: div() → <tg-emoji>〰️</tg-emoji> × count
+ */
+export function div(count = 5): string {
+  return Array(count).fill(pe('divider')).join('');
+}
+
+/**
+ * Генерирует строку-разделитель для MarkdownV2 (обычные символы)
+ * Использование: divMd() → ━━━━━━━━━━━━━━━━━━━━
+ */
+export function divMd(): string {
+  return '━━━━━━━━━━━━━━━━━━━━';
 }

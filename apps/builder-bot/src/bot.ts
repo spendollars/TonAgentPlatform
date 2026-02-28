@@ -1,6 +1,6 @@
 import { Telegraf, Context, Markup } from 'telegraf';
 import { message } from 'telegraf/filters';
-import { pe, peb, escHtml } from './premium-emoji';
+import { pe, peb, escHtml, div } from './premium-emoji';
 import { getOrchestrator, MODEL_LIST, getUserModel, setUserModel, type ModelId } from './agents/orchestrator';
 import {
   authSendPhone, authSubmitCode, authSubmitPassword,
@@ -515,19 +515,19 @@ async function showWelcome(ctx: Context, userId: number, name: string, lang: 'ru
       `<b>TON Agent Platform</b> — пишешь задачу словами,\n` +
       `AI создаёт агента, который работает 24/7.` +
       statsLine + priceLine +
-      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}━━━━\n` +
       `${pe('brain')} <b>Просто напиши задачу. Примеры:</b>\n\n` +
       examples.map(e => `• ${e}`).join('\n') + '\n\n' +
-      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}━━━━\n` +
       `${pe('bolt')} Агент запустится автоматически через 30 сек`
     : `${pe('sparkles')} <b>Welcome, ${escHtml(name)}!</b>\n\n` +
       `<b>TON Agent Platform</b> — describe a task in plain text,\n` +
       `AI creates an agent that runs 24/7.` +
       statsLine + priceLine +
-      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}━━━━\n` +
       `${pe('brain')} <b>Just type your task. Examples:</b>\n\n` +
       examples.map(e => `• ${e}`).join('\n') + '\n\n' +
-      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}━━━━\n` +
       `${pe('bolt')} Agent auto-starts within 30 seconds`;
 
   await safeReply(ctx, text, { ...getMainMenu(lang), parse_mode: 'HTML' });
@@ -676,7 +676,7 @@ async function sendPriceCard(ctx: Context) {
 
     const text =
       `💎 *TON / USD*\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `💰 *$${esc(usd.toFixed(4))}*\n` +
       `${arrow} ${sign}${esc(chg24.toFixed(2))}% ${lang === 'ru' ? 'за 24ч' : '24h change'}\n\n` +
       `📊 ${lang === 'ru' ? 'Объём' : 'Volume'} 24h: *${esc(fmtB(vol))}*\n` +
@@ -756,7 +756,7 @@ bot.command('portfolio', async (ctx) => {
 
     const text =
       `👛 *${lang === 'ru' ? 'Кошелёк' : 'Wallet'} ${esc(short)}*\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `💰 *${esc(balTON.toFixed(4))} TON*${usdVal}\n` +
       `🕐 ${lang === 'ru' ? 'Последняя транзакция' : 'Last transaction'}: ${esc(lastTx)}\n` +
       `🔗 \`${esc(addr)}\``;
@@ -836,7 +836,7 @@ bot.command('gifts', async (ctx) => {
       return;
     }
 
-    let msg = '🎁 *Fragment Gifts — Floor Prices*\n━━━━━━━━━━━━━━━━━━━━\n\n';
+    let msg = `🎁 *Fragment Gifts — Floor Prices*\n${div()}\n\n`;
     for (const g of gifts) {
       msg += `${g.emoji} ${esc(g.name)}\n`;
       msg += `  💰 Floor: \`${g.floorStars} ⭐\` ≈ \`${g.floorTon.toFixed(3)} TON\`\n`;
@@ -879,7 +879,7 @@ bot.command('config', async (ctx) => {
     if (!keys.length) {
       return safeReply(ctx,
         `📋 *Ваши переменные*\n` +
-        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `${div()}\n` +
         `_Пока ничего нет\\._\n\n` +
         `Добавьте ключи API, адреса кошельков:\n` +
         `\`/config set WALLET\\_ADDR EQ\\.\\.\\.\`\n\n` +
@@ -890,7 +890,7 @@ bot.command('config', async (ctx) => {
     const lines = keys.map(k => `\`${esc(k)}\` \\= \`${esc(String(vars[k]).slice(0, 40))}${vars[k].length > 40 ? '\\.\\.\\.' : ''}\``).join('\n');
     return safeReply(ctx,
       `📋 *Ваши переменные* \\(${esc(String(keys.length))}\\)\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `${lines}\n\n` +
       `_Доступны в агентах как \`context\\.config\\.KEY\`_`,
       { parse_mode: 'MarkdownV2' }
@@ -1267,7 +1267,7 @@ async function showProfile(ctx: Context, userId: number) {
 
   let text =
     `👤 <b>${lang === 'ru' ? 'Профиль' : 'Profile'} — ${escHtml(ctx.from?.first_name || 'User')}</b>\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `${div()}\n` +
     `${levelLabel} · Уровень <b>${level}</b>\n` +
     `${starsStr}\n\n` +
     `${pe('coin')} <b>${lang === 'ru' ? 'Баланс:' : 'Balance:'}</b> ${(profile.balance_ton || 0).toFixed(2)} TON\n` +
@@ -1277,7 +1277,7 @@ async function showProfile(ctx: Context, userId: number) {
     `${pe('card')} <b>${lang === 'ru' ? 'Подписка:' : 'Plan:'}</b> ${planIcon} ${planName} · ${genUsed}/${genLimit} ${lang === 'ru' ? 'генераций' : 'gens'}\n` +
     `${pe('calendar')} <b>${lang === 'ru' ? 'С нами с:' : 'Member since:'}</b> ${escHtml(joined)}\n` +
     `${walletLine}\n` +
-    `━━━━━━━━━━━━━━━━━━━━`;
+    `${div()}`;
 
   if (achievements.length > 0) {
     text += `\n\n${pe('sparkles')} <b>${lang === 'ru' ? 'Достижения:' : 'Achievements:'}</b>\n`;
@@ -1843,14 +1843,14 @@ bot.on('callback_query', async (ctx) => {
     await ctx.answerCbQuery();
     await safeReply(ctx,
       `✨ *Создание агента*\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `🤖 _AI напишет код и запустит агента на сервере_\n\n` +
       `*Примеры задач:*\n` +
       `💎 _"проверяй баланс UQB5\\.\\.\\. каждый час"_\n` +
       `📈 _"следи за ценой TON, уведоми если выше 5\\$"_\n` +
       `💸 _"каждый день присылай сводку по крипторынку"_\n` +
       `🌐 _"пинг сайта каждые 10 мин, уведоми при ошибке"_\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `👇 *Опишите задачу своими словами:*`,
       MAIN_MENU
     );
@@ -1941,7 +1941,7 @@ bot.on('callback_query', async (ctx) => {
       // Показываем предложенный фикс
       await ctx.telegram.editMessageText(ctx.chat!.id, statusMsg.message_id, undefined,
         `🔧 *AI нашёл исправление\\!*\n` +
-        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `${div()}\n` +
         `❌ _${esc(lastErr.error.slice(0, 80))}_\n\n` +
         `✅ *${esc(changes.slice(0, 180))}*\n\n` +
         `🚀 Применить исправление?`,
@@ -1986,7 +1986,7 @@ bot.on('callback_query', async (ctx) => {
 
     await safeReply(ctx,
       `✅ *Автопочинка завершена\\!*\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `🔧 Ошибка исправлена AI\n` +
       `⚡ _Запустите агента чтобы проверить_`,
       {
@@ -2049,7 +2049,7 @@ bot.on('callback_query', async (ctx) => {
 
     let text =
       `🔍 *Аудит — Агент \\#${esc(String(agentId))}*\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `${scoreIcon} *Безопасность: ${esc(String(score))}/100*\n` +
       `📄 ${esc(String(lines))} строк · ${hasAsync ? '✅ async' : '▶️ sync'} · ${hasTryCatch ? '✅ try/catch' : '⚠️ без try/catch'}\n`;
 
@@ -2084,7 +2084,7 @@ bot.on('callback_query', async (ctx) => {
     const agentName = agentData.data?.name || `#${agentId}`;
     await editOrReply(ctx,
       `✏️ *Изменить агента*\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `*${esc(agentName)}*  \\#${esc(String(agentId))}\n\n` +
       `Опишите что нужно изменить:\n` +
       `_"Измени интервал на каждые 30 минут"_\n` +
@@ -2551,7 +2551,7 @@ bot.on(message('text'), async (ctx) => {
       if (saveResult.success) {
         await safeReply(ctx,
           `✅ *Агент обновлён\\!*\n` +
-          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `${div()}\n` +
           `*${esc(agentResult.data.name)}*  \\#${esc(String(agentId))}\n` +
           `🔧 ${esc(fixResult.data.changes.slice(0, 180))}\n\n` +
           `_Запустите агента чтобы проверить изменения_`,
@@ -2780,7 +2780,7 @@ async function runAgentDirect(ctx: Context, agentId: number, userId: number) {
     if (pauseResult.success) {
       await editOrReply(ctx,
         `⏸ *Агент остановлен*\n` +
-        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `${div()}\n` +
         `*${esc(agent.name)}*  \\#${agentId}\n` +
         `_Scheduler деактивирован_`,
         {
@@ -2847,7 +2847,7 @@ async function runAgentDirect(ctx: Context, agentId: number, userId: number) {
 
       const successText =
         `✅ *Агент запущен\\!*\n` +
-        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `${div()}\n` +
         `*${esc(agent.name)}*  \\#${agentId}\n` +
         `⏰ Каждые *${esc(intervalLabel)}* · 🖥 сервер 24\\/7\n` +
         `⚡ _Первое уведомление придёт через несколько секунд_`;
@@ -2866,14 +2866,14 @@ async function runAgentDirect(ctx: Context, agentId: number, userId: number) {
     } else {
       // Однократный запуск — показываем результат
       const exec = data.executionResult;
-      let resultText = `✅ *Агент выполнен\\!*\n━━━━━━━━━━━━━━━━━━━━\n*${esc(agent.name)}*  \\#${agentId}\n`;
+      let resultText = `✅ *Агент выполнен\\!*\n${div()}\n*${esc(agent.name)}*  \\#${agentId}\n`;
 
       if (exec) {
         resultText += `⏱ Время: ${exec.executionTime}ms\n`;
         if (exec.success) {
           const rawResult = exec.result;
           if (rawResult !== undefined && rawResult !== null) {
-            resultText += `\n📊 *Результат:*\n━━━━━━━━━━━━━━━━━━━━\n`;
+            resultText += `\n📊 *Результат:*\n${div()}\n`;
             if (typeof rawResult === 'object' && !Array.isArray(rawResult)) {
               // Flatten: if value is an object, expand its entries too
               const flat: Array<[string, string]> = [];
@@ -3011,9 +3011,9 @@ async function showAgentsList(ctx: Context, userId: number) {
     const active = agents.filter(a => a.isActive).length;
 
     let text = `${pe('robot')} <b>Ваши агенты</b>\n`;
-    text += `━━━━━━━━━━━━━━━━━━━━\n`;
+    text += `${div()}\n`;
     text += `Всего: <b>${agents.length}</b>  ${pe('green')} Активных: <b>${active}</b>\n`;
-    text += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+    text += `${div()}\n\n`;
 
     agents.forEach((a) => {
       const st = a.isActive ? pe('green') : '⏸';
@@ -3095,7 +3095,7 @@ async function showAgentMenu(ctx: Context, agentId: number, userId: number) {
 
     const text =
       `${statusIcon} <b>${name}</b>  #${a.id}\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `${lang === 'ru' ? 'Статус' : 'Status'}: <b>${statusText}</b>\n` +
       `${triggerIcon} ${escHtml(triggerText + intervalLabel)}\n` +
       (dateLabel ? `${pe('calendar')} ${lang === 'ru' ? 'Создан' : 'Created'}: <i>${dateLabel}</i>\n` : '') +
@@ -3262,10 +3262,10 @@ async function showMarketplace(ctx: Context) {
   let text =
     `${pe('store')} <b>Маркетплейс агентов</b>\n` +
     `<i>Готовые агенты — установка в 1 клик</i>\n\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `${div()}\n` +
     `${pe('clipboard')} Шаблонов: <b>${totalTemplates}</b>`;
   if (userListingsCount > 0) text += `  👥 Сообщество: <b>${userListingsCount}</b>`;
-  text += `\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+  text += `\n${div()}\n\n`;
 
   CATS.forEach(c => {
     const count = allAgentTemplates.filter(t => t.category === c.id).length;
@@ -3342,7 +3342,7 @@ async function showTemplateDetails(ctx: Context, templateId: string) {
 
   let text =
     `${t.icon} <b>${escHtml(t.name)}</b>\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `${div()}\n` +
     `<i>${escHtml(t.description)}</i>\n\n` +
     `${triggerIcon} ${escHtml(triggerLabel)}${escHtml(intervalLine)}\n` +
     `${starsStr} · 🏷 ${t.tags.slice(0, 5).map(x => `<code>${escHtml(x)}</code>`).join(' ')}\n`;
@@ -3422,7 +3422,7 @@ async function doCreateAgentFromTemplate(ctx: Context, templateId: string, userI
   const lang = getUserLang(userId);
   let text =
     `${pe('sparkles')} <b>${lang === 'ru' ? 'Агент создан!' : 'Agent created!'}</b>\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `${div()}\n` +
     `${t.icon} <b>${escHtml(t.name)}</b>  #${agent.id}\n` +
     `${pe('cloud')} <i>На сервере · работает 24/7</i>\n`;
 
@@ -3516,7 +3516,7 @@ async function showCommunityListings(ctx: Context) {
       );
     }
 
-    let text = `${pe('store')} <b>Маркетплейс сообщества</b>\n━━━━━━━━━━━━━━━━━━━━\n<i>${listings.length} агентов от пользователей</i>\n\n`;
+    let text = `${pe('store')} <b>Маркетплейс сообщества</b>\n${div()}\n<i>${listings.length} агентов от пользователей</i>\n\n`;
     listings.slice(0, 10).forEach((l: any) => {
       const priceIcon = l.isFree ? '🆓' : `${peb('diamond')}`;
       const priceStr = l.isFree ? 'Бесплатно' : `${(l.price / 1e9).toFixed(1)} TON`;
@@ -3552,7 +3552,7 @@ async function showListingDetail(ctx: Context, listingId: number, userId: number
 
     let text =
       `${pe('robot')} <b>${escHtml(listing.name)}</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `<i>${escHtml(listing.description || 'Описание отсутствует')}</i>\n\n` +
       `${priceStr}  ·  ${pe('chart')} ${listing.totalSales} продаж\n` +
       `${starsStr}\n`;
@@ -3646,7 +3646,7 @@ async function buyMarketplaceListing(ctx: Context, listingId: number, userId: nu
 
     await editOrReply(ctx,
       `${pe('check')} <b>Агент получен!</b>\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `${pe('robot')} <b>${escHtml(listing.name)}</b>  #${newAgent.id}\n` +
       `🆓 Бесплатно из маркетплейса\n\n` +
       `<i>Запустите агента — всё готово к работе</i>`,
@@ -4017,7 +4017,7 @@ async function showPlans(ctx: Context) {
 
   let text =
     `💎 *Планы TON Agent Platform*\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `${div()}\n` +
     `_Оплата в TON · напрямую · без посредников_\n\n`;
 
   const planOrder = ['free', 'starter', 'pro', 'unlimited'];
