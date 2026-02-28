@@ -538,10 +538,10 @@ async function showWelcome(ctx: Context, userId: number, name: string, lang: 'ru
         inline_keyboard: [
           [
             { text: `${peb('plus')} ${lang === 'ru' ? 'Написать задачу' : 'Describe task'}`, callback_data: 'create_agent_prompt' },
-            { text: `${peb('diamond')} /price`, callback_data: 'live_price' },
+            { text: `${peb('diamond')} ${lang === 'ru' ? 'Цена TON' : 'TON Price'}`, callback_data: 'live_price' },
           ],
           [
-            { text: `${peb('store')} Marketplace`, callback_data: 'marketplace' },
+            { text: `${peb('store')} ${lang === 'ru' ? 'Маркетплейс' : 'Marketplace'}`, callback_data: 'marketplace' },
             { text: `👤 ${lang === 'ru' ? 'Профиль' : 'Profile'}`, callback_data: 'show_profile' },
           ],
           [
@@ -3237,12 +3237,13 @@ async function showTonConnect(ctx: Context) {
 // Маркетплейс
 // ============================================================
 async function showMarketplace(ctx: Context) {
+  const lang = getUserLang(ctx.from?.id || 0);
   const CATS = [
-    { id: 'ton',        icon: peb('diamond'),   name: 'TON блокчейн', hint: 'кошельки, переводы, DeFi' },
-    { id: 'finance',    icon: peb('coin'),       name: 'Финансы',      hint: 'цены, DEX, алерты' },
-    { id: 'monitoring', icon: peb('chart'),      name: 'Мониторинг',   hint: 'uptime, API, уведомления' },
-    { id: 'utility',    icon: peb('wrench'),     name: 'Утилиты',      hint: 'парсинг, расписания, задачи' },
-    { id: 'social',     icon: peb('megaphone'),  name: 'Социальные',   hint: 'новости, посты, каналы' },
+    { id: 'ton',        icon: peb('diamond'),   name: lang === 'ru' ? 'TON блокчейн' : 'TON Blockchain', hint: lang === 'ru' ? 'кошельки, переводы, DeFi' : 'wallets, transfers, DeFi' },
+    { id: 'finance',    icon: peb('coin'),       name: lang === 'ru' ? 'Финансы' : 'Finance',             hint: lang === 'ru' ? 'цены, DEX, алерты' : 'prices, DEX, alerts' },
+    { id: 'monitoring', icon: peb('chart'),      name: lang === 'ru' ? 'Мониторинг' : 'Monitoring',       hint: lang === 'ru' ? 'uptime, API, уведомления' : 'uptime, API, notifications' },
+    { id: 'utility',    icon: peb('wrench'),     name: lang === 'ru' ? 'Утилиты' : 'Utilities',           hint: lang === 'ru' ? 'парсинг, расписания, задачи' : 'parsing, schedules, tasks' },
+    { id: 'social',     icon: peb('megaphone'),  name: lang === 'ru' ? 'Социальные' : 'Social',           hint: lang === 'ru' ? 'новости, посты, каналы' : 'news, posts, channels' },
   ] as const;
 
   // Загружаем пользовательские листинги из БД
@@ -3260,11 +3261,11 @@ async function showMarketplace(ctx: Context) {
     .slice(0, 3);
 
   let text =
-    `${pe('store')} <b>Маркетплейс агентов</b>\n` +
-    `<i>Готовые агенты — установка в 1 клик</i>\n\n` +
+    `${pe('store')} <b>${lang === 'ru' ? 'Маркетплейс агентов' : 'Agent Marketplace'}</b>\n` +
+    `<i>${lang === 'ru' ? 'Готовые агенты — установка в 1 клик' : 'Ready agents — install in 1 click'}</i>\n\n` +
     `${div()}\n` +
-    `${pe('clipboard')} Шаблонов: <b>${totalTemplates}</b>`;
-  if (userListingsCount > 0) text += `  👥 Сообщество: <b>${userListingsCount}</b>`;
+    `${pe('clipboard')} ${lang === 'ru' ? 'Шаблонов' : 'Templates'}: <b>${totalTemplates}</b>`;
+  if (userListingsCount > 0) text += `  👥 ${lang === 'ru' ? 'Сообщество' : 'Community'}: <b>${userListingsCount}</b>`;
   text += `\n${div()}\n\n`;
 
   CATS.forEach(c => {
@@ -3273,7 +3274,7 @@ async function showMarketplace(ctx: Context) {
   });
 
   if (topTemplates.length > 0) {
-    text += `\n${pe('trending')} <b>Популярные:</b>\n`;
+    text += `\n${pe('trending')} <b>${lang === 'ru' ? 'Популярные' : 'Popular'}:</b>\n`;
     topTemplates.forEach(t => { text += `• ${t.icon} ${escHtml(t.name)}\n`; });
   }
 
@@ -3282,58 +3283,67 @@ async function showMarketplace(ctx: Context) {
       const count = allAgentTemplates.filter(t => t.category === c.id).length;
       return [{ text: `${c.icon} ${c.name} (${count})`, callback_data: `marketplace_cat:${c.id}` }];
     });
-  btns.push([{ text: `${peb('clipboard')} Все шаблоны`, callback_data: 'marketplace_all' }]);
+  btns.push([{ text: `${peb('clipboard')} ${lang === 'ru' ? 'Все шаблоны' : 'All templates'}`, callback_data: 'marketplace_all' }]);
   if (userListingsCount > 0) {
-    btns.push([{ text: '👥 От сообщества', callback_data: 'mkt_community' }]);
+    btns.push([{ text: `👥 ${lang === 'ru' ? 'От сообщества' : 'Community'}`, callback_data: 'mkt_community' }]);
   }
-  btns.push([{ text: `${peb('outbox')} Опубликовать своего агента`, callback_data: 'mkt_publish_help' }]);
+  btns.push([{ text: `${peb('outbox')} ${lang === 'ru' ? 'Опубликовать своего агента' : 'Publish your agent'}`, callback_data: 'mkt_publish_help' }]);
 
   await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: btns } });
 }
 
 async function showMarketplaceAll(ctx: Context) {
+  const lang = getUserLang(ctx.from?.id || 0);
   const templates = allAgentTemplates.slice(0, 20);
-  let text = `${pe('clipboard')} <b>Все агенты (${allAgentTemplates.length}):</b>\n\n`;
+  let text = `${pe('clipboard')} <b>${lang === 'ru' ? 'Все агенты' : 'All agents'} (${allAgentTemplates.length}):</b>\n\n`;
   templates.forEach(t => { text += `${t.icon} <b>${escHtml(t.name)}</b> — ${escHtml(t.description.slice(0, 50))}\n`; });
 
   const btns = templates.map(t => [{ text: `${t.icon} ${t.name}`, callback_data: `template:${t.id}` }]);
-  btns.push([{ text: `${peb('back')} Назад`, callback_data: 'marketplace' }]);
+  btns.push([{ text: `${peb('back')} ${lang === 'ru' ? 'Назад' : 'Back'}`, callback_data: 'marketplace' }]);
   await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: btns } });
 }
 
 async function showMarketplaceCategory(ctx: Context, category: AgentTemplate['category']) {
+  const lang = getUserLang(ctx.from?.id || 0);
   const templates = allAgentTemplates.filter(t => t.category === category);
-  if (!templates.length) { await ctx.reply('❌ Агенты не найдены', { reply_markup: { inline_keyboard: [[{ text: `${peb('back')} Назад`, callback_data: 'marketplace' }]] } }); return; }
+  if (!templates.length) { await ctx.reply('❌ ' + (lang === 'ru' ? 'Агенты не найдены' : 'Agents not found'), { reply_markup: { inline_keyboard: [[{ text: `${peb('back')} ${lang === 'ru' ? 'Назад' : 'Back'}`, callback_data: 'marketplace' }]] } }); return; }
 
   const catMeta: Record<string, { icon: string; name: string }> = {
-    ton:        { icon: peb('diamond'),  name: 'TON блокчейн' },
-    finance:    { icon: peb('coin'),     name: 'Финансы' },
+    ton:        { icon: peb('diamond'),  name: lang === 'ru' ? 'TON блокчейн' : 'TON Blockchain' },
+    finance:    { icon: peb('coin'),     name: lang === 'ru' ? 'Финансы' : 'Finance' },
     monitoring: { icon: peb('chart'),    name: 'Мониторинг' },
-    utility:    { icon: peb('wrench'),   name: 'Утилиты' },
-    social:     { icon: peb('megaphone'),name: 'Социальные' },
+    utility:    { icon: peb('wrench'),   name: lang === 'ru' ? 'Утилиты' : 'Utilities' },
+    social:     { icon: peb('megaphone'),name: lang === 'ru' ? 'Социальные' : 'Social' },
   };
   const meta = catMeta[category] || { icon: '📦', name: category };
-  let text = `${meta.icon} <b>${escHtml(meta.name)}</b> — <b>${templates.length} агентов</b>\n\nВыберите агента:\n\n`;
+  let text = `${meta.icon} <b>${escHtml(meta.name)}</b> — <b>${templates.length} ${lang === 'ru' ? 'агентов' : 'agents'}</b>\n\n${lang === 'ru' ? 'Выберите агента' : 'Choose an agent'}:\n\n`;
   templates.forEach(t => {
     text += `${t.icon} <b>${escHtml(t.name)}</b>\n<i>${escHtml(t.description.slice(0, 70))}</i>\n\n`;
   });
 
   const btns = templates.map(t => [{ text: `${t.icon} ${t.name}`, callback_data: `template:${t.id}` }]);
-  btns.push([{ text: `${peb('back')} Маркетплейс`, callback_data: 'marketplace' }]);
+  btns.push([{ text: `${peb('back')} ${lang === 'ru' ? 'Маркетплейс' : 'Marketplace'}`, callback_data: 'marketplace' }]);
   await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: btns } });
 }
 
 async function showTemplateDetails(ctx: Context, templateId: string) {
+  const lang = getUserLang(ctx.from?.id || 0);
   const t = allAgentTemplates.find(x => x.id === templateId);
-  if (!t) { await ctx.reply('❌ Шаблон не найден'); return; }
+  if (!t) { await ctx.reply('❌ ' + (lang === 'ru' ? 'Шаблон не найден' : 'Template not found')); return; }
 
   const triggerIcon = t.triggerType === 'scheduled' ? peb('calendar') : t.triggerType === 'webhook' ? peb('link') : peb('bolt');
-  const triggerLabel = t.triggerType === 'scheduled' ? 'По расписанию' : t.triggerType === 'webhook' ? 'Webhook' : 'Вручную';
+  const triggerLabel = t.triggerType === 'scheduled'
+    ? (lang === 'ru' ? 'По расписанию' : 'Scheduled')
+    : t.triggerType === 'webhook' ? 'Webhook'
+    : (lang === 'ru' ? 'Вручную' : 'Manual');
   let intervalLine = '';
   if (t.triggerType === 'scheduled' && t.triggerConfig.intervalMs) {
     const ms = t.triggerConfig.intervalMs;
-    const label = ms >= 86400000 ? `${ms / 86400000} дн` : ms >= 3600000 ? `${ms / 3600000} ч` : `${ms / 60000} мин`;
-    intervalLine = ` · каждые ${label}`;
+    const label = ms >= 86400000
+      ? `${ms / 86400000} ${lang === 'ru' ? 'дн' : 'd'}`
+      : ms >= 3600000 ? `${ms / 3600000} ${lang === 'ru' ? 'ч' : 'h'}`
+      : `${ms / 60000} ${lang === 'ru' ? 'мин' : 'min'}`;
+    intervalLine = ` · ${lang === 'ru' ? 'каждые' : 'every'} ${label}`;
   }
 
   // Рейтинг шаблона (на основе тегов как прокси популярности)
@@ -3348,18 +3358,18 @@ async function showTemplateDetails(ctx: Context, templateId: string) {
     `${starsStr} · 🏷 ${t.tags.slice(0, 5).map(x => `<code>${escHtml(x)}</code>`).join(' ')}\n`;
 
   if (t.placeholders.length) {
-    text += `\n${pe('wrench')} <b>Настраиваемые параметры:</b>\n`;
+    text += `\n${pe('wrench')} <b>${lang === 'ru' ? 'Настраиваемые параметры' : 'Configurable parameters'}:</b>\n`;
     t.placeholders.forEach(p => { text += `• <code>${escHtml(p.name)}</code>${p.required ? ' ✳️' : ''} — ${escHtml(p.description)}\n`; });
   } else {
-    text += `\n${pe('check')} <i>Готов к запуску — параметры не нужны</i>\n`;
+    text += `\n${pe('check')} <i>${lang === 'ru' ? 'Готов к запуску — параметры не нужны' : 'Ready to run — no parameters needed'}</i>\n`;
   }
 
   await editOrReply(ctx, text, {
     parse_mode: 'HTML',
     reply_markup: {
       inline_keyboard: [
-        [{ text: `${peb('rocket')} Создать и запустить`, callback_data: `create_from_template:${t.id}` }],
-        [{ text: `${peb('back')} Назад`, callback_data: `marketplace_cat:${t.category}` }, { text: `${peb('store')} Маркетплейс`, callback_data: 'marketplace' }],
+        [{ text: `${peb('rocket')} ${lang === 'ru' ? 'Создать и запустить' : 'Create & run'}`, callback_data: `create_from_template:${t.id}` }],
+        [{ text: `${peb('back')} ${lang === 'ru' ? 'Назад' : 'Back'}`, callback_data: `marketplace_cat:${t.category}` }, { text: `${peb('store')} ${lang === 'ru' ? 'Маркетплейс' : 'Marketplace'}`, callback_data: 'marketplace' }],
       ],
     },
   });
