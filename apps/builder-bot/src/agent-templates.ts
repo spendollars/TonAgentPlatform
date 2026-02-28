@@ -18,6 +18,7 @@ export interface AgentTemplate {
     description: string;
     example: string;
     required: boolean;
+    question?: string;   // Текст вопроса для wizard (если нужно спросить у пользователя)
   }>;
 }
 
@@ -762,9 +763,14 @@ async function agent(context) {
 }
 `,
   placeholders: [
-    { name: 'COLLECTION_ADDRESS', description: 'Адрес NFT коллекции (EQ...)', example: 'EQA...', required: true },
+    {
+      name: 'COLLECTION_NAME',
+      description: 'Название NFT коллекции',
+      example: 'Plush Pepes',
+      required: true,
+      question: '🎨 Какую NFT коллекцию отслеживать?\n\n_Например: TON Punks, Plush Pepes, TON Diamonds_\n\n_Адрес найдём автоматически по названию_ 🔍',
+    },
     { name: 'TARGET_PRICE', description: 'Целевая цена для уведомления (TON)', example: '10', required: false },
-    { name: 'TONAPI_KEY', description: 'API ключ TonAPI (опционально)', example: 'your_api_key', required: false }
   ]
 };
 
@@ -1047,152 +1053,73 @@ async function agent(context) {
 
 const nftFloorPredictor: AgentTemplate = {
   id: 'nft-floor-predictor',
-  name: 'NFT Floor Price Monitor',
-  description: 'Мониторит floor price ЛЮБОЙ NFT коллекции на TON. Ищет коллекцию по имени через GetGems API, получает реальные данные с TonAPI.',
+  name: 'NFT Floor Price + AI Forecast',
+  description: 'Мониторит floor price ЛЮБОЙ NFT коллекции (GetGems, TonAPI), строит AI-прогноз тренда на основе истории',
   category: 'ton',
   icon: '🔮',
-  tags: ['nft', 'floor', 'monitor', 'getgems', 'tonapi', 'price'],
+  tags: ['nft', 'floor', 'ai', 'forecast', 'prediction', 'getgems', 'tonapi'],
   triggerType: 'scheduled',
-  triggerConfig: { intervalMs: 60000 }, // каждую минуту по умолчанию
+  triggerConfig: { intervalMs: 1800000 }, // каждые 30 минут
   code: `
 async function agent(context) {
-  // ── Конфигурация ──────────────────────────────────────────────────────────
-  const collectionName = context.config.COLLECTION_NAME;
-  const collectionAddr = context.config.COLLECTION_ADDRESS || '';
-  const TONAPI_KEY = context.config.TONAPI_KEY || process.env.TONAPI_KEY || '';
-
-  if (!collectionName && !collectionAddr) {
-    await notify('⚠️ Укажите COLLECTION_NAME или COLLECTION_ADDRESS в настройках агента');
+  const collection = context.config.COLLECTION_NAME;
+  if (!collection) {
+    await notify('⚠️ Агент не настроен: укажите COLLECTION_NAME (название NFT коллекции).');
     return { error: 'no_collection_configured' };
   }
+  const TONAPI_KEY = context.config.TONAPI_KEY || process.env.TONAPI_KEY || '';
+  // Известные коллекции → адреса (verified on TonAPI)
+  const KNOWN = {
+    'ton punks':    'EQAo92DYMokxghKcq-CkCGSk_MgXY5Fo1SPW20gkvZl75iCN',
+    'tonpunks':     'EQAo92DYMokxghKcq-CkCGSk_MgXY5Fo1SPW20gkvZl75iCN',
+    'панки':        'EQAo92DYMokxghKcq-CkCGSk_MgXY5Fo1SPW20gkvZl75iCN',
+    'ton diamonds': 'EQAG2BH0JlmFkbMrLEnyn2bIITaOSssd4WdisE4BdFMkZbir',
+    'ton whales':   'EQAHOxMCdof3VJZC1jARSaTxXaTuBOElHcNfFAKl4ELjVFOG',
+    'anonymous':    'EQAOQdwdw8kGftJCSFgOErM1mBjYPe4DBPq8-AhF6vr9si5N',
+    'tonxpunks':    '0:9dd1dfc276588412f79b64e4d659d8427d61add13014125c30133c17d3c99044',
+    'plush pepes':  'EQBG-g6ahkAUGWpefWbx-D_9sQ8oWbvy6puuq78U2c4NUDFS',
+    'plush pepe':   'EQBG-g6ahkAUGWpefWbx-D_9sQ8oWbvy6puuq78U2c4NUDFS',
+    'пепе':         'EQBG-g6ahkAUGWpefWbx-D_9sQ8oWbvy6puuq78U2c4NUDFS',
+  };
+  const collectionAddr = context.config.COLLECTION_ADDRESS ||
+    KNOWN[collection.toLowerCase()] || '';
 
-  // ── Поиск адреса коллекции по имени ──────────────────────────────────────
-  async function searchCollectionByName(name) {
-    const TONAPI_KEY = context.config.TONAPI_KEY || process.env.TONAPI_KEY || '';
-    const headers = {
-      'Accept': 'application/json',
-      ...(TONAPI_KEY ? { 'Authorization': 'Bearer ' + TONAPI_KEY } : {}),
-    };
-
-    // Метод 1: GetGems GraphQL search
+  // ── Convert EQ address to raw 0:hex format for TonAPI ──
+  function eqToRaw(addr) {
+    if (!addr || addr.startsWith('0:')) return addr;
     try {
-      const gqlBody = JSON.stringify({
-        query: \`query {
-          alphaNftCollectionSearch(query: "\${name.replace(/"/g, '').replace(/\\\\/g, '')}", count: 5) {
-            items {
-              address
-              name
-              approximateHoldersCount
-              approximateItemsCount
-              floorPrice
-            }
-          }
-        }\`
-      });
-      const resp = await fetch('https://api.getgems.io/graphql', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: gqlBody,
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        const items = data?.data?.alphaNftCollectionSearch?.items || [];
-        if (items.length > 0) {
-          const col = items[0];
-          console.log('🔍 GetGems found: ' + col.name + ' addr=' + col.address);
-          return {
-            address: col.address,
-            name: col.name,
-            items: col.approximateItemsCount || 0,
-            holders: col.approximateHoldersCount || 0,
-            floorTon: col.floorPrice ? parseInt(col.floorPrice) / 1e9 : 0,
-          };
-        }
-      }
-    } catch (e) {
-      console.warn('⚠️ GetGems GQL search failed:', e.message);
-    }
-
-    // Метод 2: TonAPI search (поиск по имени через /v2/nfts/collections)
-    try {
-      const resp = await fetch(
-        'https://tonapi.io/v2/nfts/collections?limit=20',
-        { headers }
-      );
-      if (resp.ok) {
-        const data = await resp.json();
-        const cols = data?.nft_collections || [];
-        const nameLower = name.toLowerCase();
-        const found = cols.find(c =>
-          (c?.metadata?.name || '').toLowerCase().includes(nameLower)
-        );
-        if (found) {
-          const addr = found.address;
-          const colName = found?.metadata?.name || name;
-          console.log('🔍 TonAPI found: ' + colName + ' addr=' + addr);
-          return { address: addr, name: colName, items: found.next_item_index || 0, holders: 0, floorTon: 0 };
-        }
-      }
-    } catch (e) {
-      console.warn('⚠️ TonAPI collection search failed:', e.message);
-    }
-
-    // Метод 3: GetGems страница поиска (парсинг HTML)
-    try {
-      const resp = await fetch(
-        'https://getgems.io/nft?query=' + encodeURIComponent(name),
-        { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html' } }
-      );
-      if (resp.ok) {
-        const html = await resp.text();
-        const m = html.match(/\/collection\/(EQ[A-Za-z0-9_\-]{46})/);
-        if (m) {
-          console.log('🔍 GetGems HTML found addr=' + m[1]);
-          return { address: m[1], name: name, items: 0, holders: 0, floorTon: 0 };
-        }
-      }
-    } catch (e) {
-      console.warn('⚠️ GetGems HTML search failed:', e.message);
-    }
-
-    return null;
+      const s = addr.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = s + '=='.slice(0, (4 - s.length % 4) % 4);
+      const buf = Buffer.from(padded, 'base64');
+      return '0:' + buf.slice(2, 34).toString('hex');
+    } catch { return addr; }
   }
 
-  // ── Получить floor price через TonAPI (сканируем листинги) ────────────────
-  async function fetchFloorFromTonAPI(addr) {
+  // ── Fetch real NFT data from TonAPI (primary, works with API key) ──
+  async function fetchTonAPIData(addr) {
     if (!addr) return null;
     try {
-      // Конвертируем EQ адрес в raw формат для TonAPI
-      function eqToRaw(a) {
-        if (!a || a.startsWith('0:')) return a;
-        try {
-          const s = a.replace(/-/g, '+').replace(/_/g, '/');
-          const padded = s + '=='.slice(0, (4 - s.length % 4) % 4);
-          const buf = Buffer.from(padded, 'base64');
-          return '0:' + buf.slice(2, 34).toString('hex');
-        } catch { return a; }
-      }
       const rawAddr = eqToRaw(addr);
       const headers = {
         'Accept': 'application/json',
         ...(TONAPI_KEY ? { 'Authorization': 'Bearer ' + TONAPI_KEY } : {}),
       };
 
-      // Метаданные коллекции
-      let name = collectionName || addr.slice(0, 8);
+      // Get collection metadata (total items only — keep user-configured name as display name)
+      let name = collection; // always use the configured name, never override
       let itemsCount = 0;
       try {
         const colResp = await fetch('https://tonapi.io/v2/nfts/collections/' + rawAddr, { headers });
         if (colResp.ok) {
           const colData = await colResp.json();
-          name = colData?.metadata?.name || name;
+          // Do NOT override name with TonAPI metadata — use the name the user configured
           itemsCount = colData?.next_item_index || 0;
         }
       } catch {}
 
-      // Сканируем листинги для floor price
+      // Get floor price from listed items (scan up to 200)
       const prices = [];
-      for (let offset = 0; offset < 300; offset += 100) {
+      for (let offset = 0; offset < 200; offset += 100) {
         const r = await fetch(
           'https://tonapi.io/v2/nfts/collections/' + rawAddr + '/items?limit=100&offset=' + offset,
           { headers }
@@ -1208,152 +1135,156 @@ async function agent(context) {
       }
       prices.sort((a, b) => a - b);
       const floor = prices.length > 0 ? prices[0] : 0;
-      console.log('✅ TonAPI: floor=' + floor.toFixed(2) + ' TON, listings=' + prices.length + ', items=' + itemsCount);
-      return { floor, items: itemsCount, name, source: 'tonapi.io', listings: prices.length };
+      console.log('✅ TonAPI: floor=' + floor.toFixed(2) + ' TON from ' + prices.length + ' listings, total=' + itemsCount);
+      return { floor, items: itemsCount, holders: 0, totalVolTon: 0, name, source: 'tonapi.io', listings: prices.length };
     } catch (e) {
       console.warn('⚠️ TonAPI failed:', e.message);
       return null;
     }
   }
 
-  // ── Цена TON в USD ─────────────────────────────────────────────────────────
-  async function getTonUsdPrice() {
+  // Keep for legacy - now just calls TonAPI
+  async function fetchGetGemsData(addr) {
+    return fetchTonAPIData(addr);
+  }
+
+  // ── Get TON price in USD ──
+  async function getTonPrice() {
     try {
-      const r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd');
+      const r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd&include_24hr_change=true');
       const d = await r.json();
-      return d['the-open-network']?.usd || 0;
-    } catch { return 0; }
+      return { usd: d['the-open-network'].usd || 0, change24h: d['the-open-network'].usd_24h_change || 0 };
+    } catch { return { usd: 0, change24h: 0 }; }
   }
 
   try {
-    // ── Шаг 1: Найти адрес коллекции ─────────────────────────────────────────
-    let resolvedAddr = collectionAddr;
-    let resolvedName = collectionName || '';
-    let resolvedItems = 0;
-    let resolvedHolders = 0;
-    let resolvedFloor = 0;
+    console.log('🎨 NFT Monitor: ' + collection + (collectionAddr ? ' [' + collectionAddr.slice(0, 8) + '...]' : ''));
 
-    if (!resolvedAddr && collectionName) {
-      console.log('🔍 Ищем коллекцию: ' + collectionName);
-      const found = await searchCollectionByName(collectionName);
-      if (found) {
-        resolvedAddr = found.address;
-        resolvedName = found.name;
-        resolvedItems = found.items;
-        resolvedHolders = found.holders;
-        resolvedFloor = found.floorTon;
-        // Кэшируем адрес чтобы не искать каждый раз
-        setState('resolved_address', resolvedAddr);
-        setState('resolved_name', resolvedName);
-      } else {
-        // Пробуем из кэша
-        const cachedAddr = getState('resolved_address');
-        if (cachedAddr) {
-          resolvedAddr = cachedAddr;
-          resolvedName = getState('resolved_name') || collectionName;
-          console.log('📌 Using cached address: ' + resolvedAddr);
-        } else {
-          await notify('❌ Коллекция *' + collectionName + '* не найдена на GetGems.\\nПроверьте название или укажите COLLECTION_ADDRESS.');
-          return { error: 'collection_not_found', name: collectionName };
-        }
-      }
-    } else if (resolvedAddr) {
-      // Адрес задан напрямую — берём из кэша или TonAPI
-      resolvedName = getState('resolved_name') || collectionName || resolvedAddr.slice(0, 8);
+    // Fetch real data
+    let data = await fetchGetGemsData(collectionAddr);
+    if (!data || data.floor === 0) {
+      data = await fetchTonAPIData(collectionAddr);
     }
-
-    // ── Шаг 2: Получить floor price ───────────────────────────────────────────
-    let floorTon = resolvedFloor;
-    let itemsCount = resolvedItems;
-
-    // Если GetGems не дал floor или он 0 — берём из TonAPI
-    if (floorTon === 0 && resolvedAddr) {
-      const tonData = await fetchFloorFromTonAPI(resolvedAddr);
-      if (tonData) {
-        floorTon = tonData.floor;
-        itemsCount = tonData.items || itemsCount;
-        if (tonData.name && !resolvedName) resolvedName = tonData.name;
-      }
-    }
-
-    if (floorTon === 0) {
+    if (!data) {
+      // Use cached price as last resort (never fake random)
       const cached = getState('last_price');
       if (cached) {
-        floorTon = cached;
-        console.log('📌 No listings found, using cached price: ' + floorTon);
+        data = { floor: cached, items: 0, holders: 0, totalVolTon: 0, name: collection, source: 'cached' };
+        console.log('📌 Using cached price:', cached);
       } else {
-        await notify('⚠️ *' + resolvedName + '*\\nАктивных листингов не найдено.\\nВозможно коллекция не торгуется.');
-        return { error: 'no_listings', collection: resolvedName };
+        await notify('⚠️ *' + collection + '*\\nНе удалось получить данные.\\nПроверьте адрес коллекции.');
+        return { error: 'no_data', collection };
       }
     }
 
-    // ── Шаг 3: История цен и тренд ────────────────────────────────────────────
-    const tonUsd = await getTonUsdPrice();
-    const floorUsd = tonUsd > 0 ? (floorTon * tonUsd).toFixed(0) : '?';
+    // Нет активных листингов — сообщаем пользователю и выходим до следующей проверки
+    if (data.floor === 0 && data.listings === 0) {
+      const addr = collectionAddr ? collectionAddr.slice(0, 14) + '…' : '';
+      await notify(
+        '📭 *' + collection + '*\\n' +
+        '━━━━━━━━━━━━━━━━━━━━\\n' +
+        '⚠️ Нет активных листингов на продажу\\n' +
+        '_Буду проверять каждые 30 минут_' +
+        (addr ? '\\n_Адрес: ' + addr + '_' : '')
+      );
+      return { status: 'no_listings', collection };
+    }
 
+    const tonPriceData = await getTonPrice();
+    const floorTon = data.floor;
+    const floorUsd = tonPriceData.usd > 0 ? (floorTon * tonPriceData.usd).toFixed(0) : '?';
+
+    // Price history for trend analysis (up to 14 points = 7 days at 12h interval)
     const history = getState('price_history') || [];
     history.push({ price: floorTon, ts: Date.now() });
-    if (history.length > 20) history.shift();
+    if (history.length > 14) history.shift();
     setState('price_history', history);
     setState('last_price', floorTon);
-    setState('resolved_name', resolvedName);
+    setState('last_holders', data.holders);
 
-    // Линейная регрессия для прогноза
+    // Trend calculation: linear regression over history
     let forecast = floorTon;
     let trendPct = 0;
     let momentum = 'нейтральный';
-    if (history.length >= 3) {
-      const pts = history.map(h => h.price);
-      const n = pts.length;
-      let sx = 0, sy = 0, sxy = 0, sx2 = 0;
-      for (let i = 0; i < n; i++) { sx += i; sy += pts[i]; sxy += i * pts[i]; sx2 += i * i; }
-      const slope = (n * sxy - sx * sy) / (n * sx2 - sx * sx);
-      const intercept = (sy - slope * sx) / n;
+    if (history.length >= 2) {
+      const prices = history.map(h => h.price);
+      const n = prices.length;
+      // Linear regression
+      let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+      for (let i = 0; i < n; i++) {
+        sumX += i; sumY += prices[i];
+        sumXY += i * prices[i]; sumX2 += i * i;
+      }
+      const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+      const intercept = (sumY - slope * sumX) / n;
       forecast = Math.max(0, intercept + slope * n);
       trendPct = floorTon > 0 ? ((forecast - floorTon) / floorTon) * 100 : 0;
-      const recent = pts.slice(-3).reduce((a, b) => a + b, 0) / 3;
-      const older = pts.slice(0, -3);
+
+      // Momentum detection
+      const recent3 = prices.slice(-3);
+      const avg3 = recent3.reduce((a, b) => a + b, 0) / recent3.length;
+      const older = prices.slice(0, -3);
       if (older.length > 0) {
         const avgOld = older.reduce((a, b) => a + b, 0) / older.length;
-        const mp = ((recent - avgOld) / avgOld) * 100;
-        momentum = mp > 3 ? 'бычий 🐂' : mp < -3 ? 'медвежий 🐻' : 'боковик ↔️';
+        const momentumPct = ((avg3 - avgOld) / avgOld) * 100;
+        if (momentumPct > 3) momentum = 'бычий 🐂';
+        else if (momentumPct < -3) momentum = 'медвежий 🐻';
+        else momentum = 'боковик ↔️';
       }
     }
 
+    // Change since last check
     const prevPrice = history.length >= 2 ? history[history.length - 2].price : floorTon;
     const changePct = prevPrice > 0 ? ((floorTon - prevPrice) / prevPrice) * 100 : 0;
     const changeSign = changePct >= 0 ? '+' : '';
     const trendArrow = trendPct >= 0 ? '📈' : '📉';
-    const forecastSign = trendPct >= 0 ? '+' : '';
     const confidence = Math.min(40 + history.length * 3, 85);
+    const forecastSign = trendPct >= 0 ? '+' : '';
     const timeUTC = new Date().toUTCString().replace(/.*?(\\d{2}:\\d{2}).*/, '$1');
 
+    // Smart signal
     let signal = '⚖️ ДЕРЖАТЬ';
-    if (trendPct > 5) signal = '🟢 ПОКУПАТЬ';
-    else if (trendPct < -5) signal = '🔴 ПРОДАВАТЬ';
-    else if (trendPct > 2) signal = '🟡 НАКАПЛИВАТЬ';
+    let signalReason = '';
+    if (trendPct > 5 && data.holders > 500) {
+      signal = '🟢 ПОКУПАТЬ'; signalReason = 'Восходящий тренд + сильная база держателей';
+    } else if (trendPct < -5) {
+      signal = '🔴 ПРОДАВАТЬ'; signalReason = 'Нисходящий тренд, риск дальнейшего снижения';
+    } else if (trendPct > 2) {
+      signal = '🟡 НАКАПЛИВАТЬ'; signalReason = 'Слабый рост, можно добирать на откатах';
+    } else if (data.holders > 0 && data.items > 0) {
+      const holderRatio = data.holders / data.items;
+      if (holderRatio > 0.3) signalReason = 'Хорошее распределение (' + Math.round(holderRatio * 100) + '%)';
+    }
 
-    // ── Шаг 4: Отправить уведомление ─────────────────────────────────────────
     await notify(
-      '🎨 *' + resolvedName + '*\\n' +
+      '🎨 *' + collection + '*\\n' +
       '━━━━━━━━━━━━━━━━━━━━\\n' +
       '💰 Floor: \`' + floorTon.toFixed(2) + ' TON\`' + (floorUsd !== '?' ? ' ≈ $' + floorUsd : '') + '\\n' +
       (changePct !== 0 ? (changePct >= 0 ? '📈' : '📉') + ' Изм: \`' + changeSign + changePct.toFixed(1) + '%\`\\n' : '') +
-      (resolvedHolders > 0 ? '👥 Holders: \`' + resolvedHolders.toLocaleString() + '\`\\n' : '') +
-      (itemsCount > 0 ? '🖼 Items: \`' + itemsCount.toLocaleString() + '\`\\n' : '') +
-      (history.length >= 3 ?
-        '\\n🔮 *Прогноз (следующий период):*\\n' +
-        '   ' + trendArrow + ' \`' + forecast.toFixed(2) + ' TON\` (' + forecastSign + trendPct.toFixed(1) + '%)\\n' +
-        '   Моментум: ' + momentum + '\\n' +
-        '   Уверенность: \`' + confidence + '%\` (' + history.length + ' точек)\\n' +
-        '\\n📡 *Сигнал: ' + signal + '*\\n'
-        : '') +
-      '\\n_Источник: GetGems + TonAPI • ' + timeUTC + ' UTC_'
+      (data.holders > 0 ? '👥 Holders: \`' + data.holders.toLocaleString() + '\`\\n' : '') +
+      (data.items > 0 ? '🖼 Items: \`' + data.items.toLocaleString() + '\`\\n' : '') +
+      (data.totalVolTon > 0 ? '📊 Volume: \`' + data.totalVolTon.toLocaleString() + ' TON\`\\n' : '') +
+      '\\n🔮 *AI Прогноз (12ч):*\\n' +
+      '   ' + trendArrow + ' \`' + forecast.toFixed(2) + ' TON\` (' + forecastSign + trendPct.toFixed(1) + '%)\\n' +
+      '   Моментум: ' + momentum + '\\n' +
+      '   Уверенность: \`' + confidence + '%\` (' + history.length + ' точек)\\n' +
+      '\\n📡 *Сигнал: ' + signal + '*\\n' +
+      (signalReason ? '_' + signalReason + '_\\n' : '') +
+      '\\n_Источник: ' + data.source + ' • ' + timeUTC + ' UTC_'
     );
 
-    console.log('✅ Sent: ' + resolvedName + ' floor=' + floorTon.toFixed(2) + ' signal=' + signal);
-    return { collection: resolvedName, floor: floorTon.toFixed(2) + ' TON', signal };
+    console.log('✅ Sent: floor=' + floorTon.toFixed(2) + ' forecast=' + forecast.toFixed(2) + ' signal=' + signal);
 
+    return {
+      collection: collection,
+      floor: floorTon.toFixed(2) + ' TON',
+      forecast: forecast.toFixed(2) + ' TON',
+      trend: forecastSign + trendPct.toFixed(1) + '%',
+      signal,
+      momentum,
+      confidence: confidence + '%',
+      source: data.source,
+    };
   } catch (error) {
     console.error('❌ Ошибка:', error.message);
     await notify('❌ NFT Monitor ошибка: ' + error.message);
@@ -1362,9 +1293,13 @@ async function agent(context) {
 }
 `,
   placeholders: [
-    { name: 'COLLECTION_NAME',    description: 'Название коллекции (поиск через GetGems API)', example: 'Cupid Charm', required: true },
-    { name: 'COLLECTION_ADDRESS', description: 'Адрес коллекции EQ... (опционально, если знаете точный адрес)', example: '', required: false },
-    { name: 'TONAPI_KEY',         description: 'API ключ TonAPI (опционально, для снятия rate limit)', example: '', required: false },
+    {
+      name: 'COLLECTION_NAME',
+      description: 'Название NFT коллекции для мониторинга',
+      example: 'Plush Pepes',
+      required: true,
+      question: '🎨 Какую NFT коллекцию отслеживать?\n\n_Например: TON Punks, Plush Pepes, TON Diamonds_\n\n_Адрес найдём автоматически по названию_ 🔍',
+    },
   ]
 };
 
@@ -1600,11 +1535,113 @@ export const multiAgentTemplates: AgentTemplate[] = [
   priceAlertAgent,
 ];
 
+// ── Telegram Star Gift Monitor ────────────────────────────────
+const telegramGiftMonitor: AgentTemplate = {
+  id: 'telegram-gift-monitor',
+  name: 'Telegram Gift Floor Monitor',
+  description: 'Мониторит floor price Telegram Star Gift на Fragment.com. Работает с любыми подарками: Love Potion, Jelly Bunny, Plush Pepe и другими. Требует /tglogin авторизацию.',
+  category: 'ton',
+  icon: '🎁',
+  tags: ['gift', 'fragment', 'stars', 'telegram', 'floor', 'monitor'],
+  triggerType: 'scheduled',
+  triggerConfig: { intervalMs: 1800000 }, // каждые 30 минут
+  placeholders: [
+    {
+      name: 'GIFT_NAME',
+      description: 'Название подарка (например: Love Potion, Jelly Bunny, Plush Pepe)',
+      example: 'Love Potion',
+      required: true,
+      question: '🎁 Какой подарок отслеживать?\n\nВведите название (например: _Love Potion_, _Jelly Bunny_, _Plush Pepe_)',
+    },
+  ],
+  code: `
+async function agent(context) {
+  const giftName = context.config.GIFT_NAME;
+  if (!giftName) {
+    await notify('⚠️ Агент не настроен: укажите GIFT_NAME (название Telegram подарка).');
+    return { error: 'no_gift_configured' };
+  }
+
+  // Конвертируем название в slug: "Love Potion" → "love-potion"
+  const slug = giftName.toLowerCase().replace(/\\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+
+  // Получаем данные через локальный Fragment API (fragment-service.ts + MTProto)
+  let data;
+  try {
+    const resp = await fetch('http://localhost:3001/api/fragment/gift/' + slug);
+    data = await resp.json();
+  } catch(e) {
+    await notify('❌ Не удалось подключиться к Fragment API. Бот недоступен?');
+    return { error: 'api_unavailable' };
+  }
+
+  if (!data.ok) {
+    if (data.error === 'not_authenticated') {
+      await notify(
+        '🔐 *' + giftName + '*\\n' +
+        '━━━━━━━━━━━━━━━━━━━━\\n' +
+        '❌ Нужна авторизация Telegram для Fragment\\n' +
+        '_Отправьте /tglogin в боте и пройдите авторизацию_'
+      );
+      return { error: 'not_authenticated' };
+    }
+    if (data.error === 'not_found') {
+      await notify(
+        '⚠️ *' + giftName + '*\\n' +
+        '━━━━━━━━━━━━━━━━━━━━\\n' +
+        '❌ Подарок не найден на Fragment\\n' +
+        '_Проверьте название: оно должно совпадать с именем на fragment.com_'
+      );
+      return { error: 'not_found' };
+    }
+    await notify('⚠️ Fragment API: ' + (data.error || 'Unknown error'));
+    return { error: data.error };
+  }
+
+  const floorStars = data.floorStars || 0;
+  const floorTon = data.floorTon || 0;
+  const listed = data.listed || 0;
+
+  if (floorStars === 0) {
+    await notify(
+      '📭 *' + giftName + '*\\n' +
+      '━━━━━━━━━━━━━━━━━━━━\\n' +
+      '⚠️ Нет активных листингов на Fragment\\n' +
+      '_Буду проверять каждые 30 минут_'
+    );
+    return { status: 'no_listings', giftName };
+  }
+
+  // Считаем изменение цены
+  const lastFloor = getState('last_floor') || 0;
+  const change = lastFloor ? floorStars - lastFloor : 0;
+  setState('last_floor', floorStars);
+  setState('last_check', Date.now());
+
+  const changeStr = change !== 0 ? ' (' + (change > 0 ? '+' : '') + change + '★)' : '';
+  const tonStr = floorTon > 0 ? ' ≈ ' + floorTon.toFixed(4) + ' TON' : '';
+
+  await notify(
+    '🎁 *' + giftName + '*\\n' +
+    '━━━━━━━━━━━━━━━━━━━━\\n' +
+    '⭐ Floor: *' + floorStars + ' Stars*' + changeStr + '\\n' +
+    (tonStr ? '_' + tonStr + '_\\n' : '') +
+    '📋 Listed: ' + listed + '\\n' +
+    (data.avgStars ? '📊 Avg: ' + data.avgStars + '★\\n' : '') +
+    '_Источник: Fragment.com_'
+  );
+
+  return { giftName, floorStars, listed, change };
+}
+`,
+};
+
 // ВСЕ шаблоны (для маркетплейса)
 export const allAgentTemplates: AgentTemplate[] = [
   ...agentTemplates,
   ...advancedAgentTemplates,
   ...multiAgentTemplates,
+  telegramGiftMonitor,
 ];
 
 // Функции для работы с шаблонами

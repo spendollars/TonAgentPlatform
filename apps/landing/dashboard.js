@@ -122,12 +122,6 @@ function showApp() {
 
   // Start live updates
   startLiveUpdates();
-
-  // Initialize TON Connect and load balance
-  setTimeout(() => {
-    if (typeof initTonConnect === 'function') initTonConnect().catch(console.error);
-    if (typeof loadBalance === 'function') loadBalance().catch(console.error);
-  }, 600);
 }
 
 // Load real stats + agents + plugins
@@ -369,17 +363,17 @@ async function startBotAuth() {
   }
 
   _botAuthToken = data.authToken;
-  window.open(data.botLink, '_blank');
-
+  // Do NOT use window.open() — it gets blocked by popup blockers after async calls.
+  // Instead show a prominent <a> link the user clicks directly (real user gesture).
   if (container) {
     container.innerHTML = `
       <div style="text-align:center;padding:8px 0 16px">
-        <div style="font-size:2rem;margin-bottom:8px;">📱</div>
-        <p style="color:var(--text-secondary);font-size:.875rem;margin-bottom:4px;font-weight:500;">Ожидаю подтверждения в Telegram...</p>
-        <p style="color:var(--text-muted);font-size:.75rem;margin-bottom:16px;">Нажмите /start в боте — он откроется автоматически</p>
+        <div style="font-size:1.75rem;margin-bottom:10px;">📲</div>
+        <p style="color:var(--text-secondary);font-size:.9rem;margin-bottom:4px;font-weight:500;">Откройте Telegram и нажмите Start</p>
+        <p style="color:var(--text-muted);font-size:.75rem;margin-bottom:16px;">После нажатия /start страница обновится автоматически</p>
         <a href="${escHtml(data.botLink)}" target="_blank"
-           style="display:inline-flex;align-items:center;gap:6px;padding:8px 18px;background:rgba(33,150,243,.15);color:#2196F3;border:1px solid rgba(33,150,243,.3);border-radius:6px;font-size:.8125rem;text-decoration:none;margin-bottom:10px;">
-          🤖 Открыть бота снова
+           style="display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 28px;background:#2196F3;color:#fff;border-radius:8px;font-size:.9375rem;font-weight:600;text-decoration:none;margin-bottom:16px;min-width:200px;">
+          🤖 Открыть Telegram
         </a><br>
         <button onclick="cancelBotAuth()"
           style="background:none;border:none;color:var(--text-muted);font-size:.8125rem;cursor:pointer;text-decoration:underline;">
@@ -1742,256 +1736,5 @@ async function loadProfile() {
     setEl('profile-success-rate', stats.successRate != null ? stats.successRate + '%' : '—');
   }
 }
-
-// ===== BALANCE PAGE =====
-// Platform deposit address
-const PLATFORM_TON_ADDRESS = 'UQCfRrLVr7MeGbVw4x1XgZ42ZUS7tdf2sEYSyRvmoEB4y_dh';
-const PLATFORM_TON_DNS = 'agentplatform.ton';
-
-// TON Connect UI instance
-let tonConnectUI = null;
-let _tonConnectWallet = null;
-
-// Initialize TON Connect
-async function initTonConnect() {
-  try {
-    const manifestUrl = (window._appConfig && window._appConfig.manifestUrl)
-      || `${window.location.origin}/tonconnect-manifest.json`;
-
-    if (typeof window.TON_CONNECT_UI === 'undefined' && typeof window.TonConnectUI === 'undefined') {
-      console.warn('TON Connect UI SDK not loaded');
-      return;
-    }
-
-    const TonConnectUI = window.TonConnectUI || (window.TON_CONNECT_UI && window.TON_CONNECT_UI.TonConnectUI);
-    if (!TonConnectUI) return;
-
-    tonConnectUI = new TonConnectUI({
-      manifestUrl,
-      buttonRootId: 'ton-connect-button-container',
-    });
-
-    // Listen for wallet connection changes
-    tonConnectUI.onStatusChange(wallet => {
-      _tonConnectWallet = wallet;
-      const quickSection = document.getElementById('quick-deposit-section');
-      if (quickSection) {
-        quickSection.style.display = wallet ? 'block' : 'none';
-      }
-    });
-
-  } catch (e) {
-    console.warn('TON Connect init error:', e);
-  }
-}
-
-// Load balance from API
-async function loadBalance() {
-  if (!authToken) return;
-  try {
-    const data = await apiRequest('GET', '/api/balance');
-    if (!data.ok) return;
-
-    // Update balance page values
-    const tonVal = document.getElementById('balance-ton-value');
-    if (tonVal) tonVal.textContent = data.balanceTon.toFixed(4);
-
-    const totalDep = document.getElementById('balance-total-deposited');
-    if (totalDep) totalDep.textContent = data.totalDepositedTon.toFixed(4) + ' TON';
-
-    const totalSpent = document.getElementById('balance-total-spent');
-    if (totalSpent) totalSpent.textContent = data.totalSpentTon.toFixed(4) + ' TON';
-
-    // Update deposit address
-    const addrEl = document.getElementById('deposit-address-raw');
-    if (addrEl && data.depositAddress) addrEl.textContent = data.depositAddress;
-
-    // Update sidebar balance widget
-    const sidebarVal = document.getElementById('sidebar-balance-value');
-    if (sidebarVal) sidebarVal.textContent = data.balanceTon.toFixed(4) + ' TON';
-
-    // Update nav badge
-    const navBadge = document.getElementById('balance-nav-amount');
-    if (navBadge) navBadge.textContent = data.balanceTon.toFixed(2) + ' TON';
-
-    // Fetch TON price for USD equivalent
-    fetchTonPrice(data.balanceTon);
-
-    // Load transactions
-    await loadBalanceTransactions();
-
-  } catch (e) {
-    console.error('loadBalance error:', e);
-  }
-}
-
-// Fetch TON price from public API
-async function fetchTonPrice(balanceTon) {
-  try {
-    const res = await fetch('https://tonapi.io/v2/rates?tokens=ton&currencies=usd');
-    const data = await res.json();
-    const price = data?.rates?.TON?.prices?.USD || 0;
-    const usdVal = (balanceTon * price).toFixed(2);
-    const usdEl = document.getElementById('balance-usd-equiv');
-    if (usdEl) usdEl.textContent = `≈ $${usdVal}`;
-  } catch (_) {
-    // silently fail
-  }
-}
-
-// Load transaction history
-async function loadBalanceTransactions() {
-  if (!authToken) return;
-  const container = document.getElementById('balance-transactions-list');
-  if (!container) return;
-
-  try {
-    const data = await apiRequest('GET', '/api/balance/transactions?limit=30');
-    if (!data.ok) {
-      container.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted)">Failed to load transactions</div>';
-      return;
-    }
-
-    const txs = data.transactions || [];
-    if (!txs.length) {
-      container.innerHTML = `<div style="padding:2rem;text-align:center;color:var(--text-muted)">${currentLang === 'ru' ? 'Транзакций пока нет. Пополните баланс!' : 'No transactions yet. Make a deposit!'}</div>`;
-      return;
-    }
-
-    const typeIcon = t => t === 'deposit' ? '⬇️' : t === 'spend' ? '⬆️' : '🔄';
-    const typeColor = t => t === 'deposit' ? 'var(--success)' : t === 'spend' ? 'var(--danger)' : 'var(--warning)';
-    const typeLabel = t => {
-      if (currentLang === 'ru') {
-        return t === 'deposit' ? 'Пополнение' : t === 'spend' ? 'Списание' : 'Возврат';
-      }
-      return t === 'deposit' ? 'Deposit' : t === 'spend' ? 'Spend' : 'Refund';
-    };
-
-    container.innerHTML = `
-      <table style="width:100%;border-collapse:collapse;font-size:.85rem">
-        <thead>
-          <tr style="border-bottom:1px solid var(--border);color:var(--text-muted)">
-            <th style="text-align:left;padding:.6rem 1rem">${currentLang === 'ru' ? 'Тип' : 'Type'}</th>
-            <th style="text-align:right;padding:.6rem .5rem">${currentLang === 'ru' ? 'Сумма' : 'Amount'}</th>
-            <th style="text-align:left;padding:.6rem .5rem">${currentLang === 'ru' ? 'Статус' : 'Status'}</th>
-            <th style="text-align:left;padding:.6rem .5rem">${currentLang === 'ru' ? 'Время' : 'Time'}</th>
-            <th style="text-align:left;padding:.6rem .5rem">TX</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${txs.map(tx => `
-            <tr style="border-bottom:1px solid var(--border-subtle)">
-              <td style="padding:.5rem 1rem">
-                <span style="color:${typeColor(tx.type)};font-weight:500">${typeIcon(tx.type)} ${typeLabel(tx.type)}</span>
-              </td>
-              <td style="padding:.5rem .5rem;text-align:right;font-weight:600;color:${typeColor(tx.type)}">
-                ${tx.type === 'deposit' ? '+' : '-'}${tx.amountTon.toFixed(4)} TON
-              </td>
-              <td style="padding:.5rem .5rem">
-                <span style="padding:2px 8px;border-radius:4px;font-size:.75rem;background:${tx.status === 'confirmed' ? 'rgba(34,197,94,.15)' : 'rgba(245,158,11,.15)'};color:${tx.status === 'confirmed' ? 'var(--success)' : 'var(--warning)'}">
-                  ${tx.status}
-                </span>
-              </td>
-              <td style="padding:.5rem .5rem;color:var(--text-muted)">${new Date(tx.createdAt).toLocaleString()}</td>
-              <td style="padding:.5rem .5rem">
-                ${tx.txHash ? `<a href="https://tonscan.org/tx/${escHtml(tx.txHash)}" target="_blank" style="color:var(--primary);font-size:.75rem;font-family:monospace">${tx.txHash.slice(0,8)}…</a>` : '—'}
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table>`;
-  } catch (e) {
-    container.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted)">Error loading transactions</div>';
-  }
-}
-
-// Copy deposit address to clipboard
-function copyDepositAddress() {
-  const addr = document.getElementById('deposit-address-raw');
-  const text = addr ? addr.textContent : PLATFORM_TON_ADDRESS;
-  navigator.clipboard.writeText(text).then(() => {
-    showNotification(currentLang === 'ru' ? 'Адрес скопирован!' : 'Address copied!', 'success');
-  }).catch(() => {
-    // Fallback
-    const el = document.createElement('textarea');
-    el.value = text;
-    document.body.appendChild(el);
-    el.select();
-    document.execCommand('copy');
-    document.body.removeChild(el);
-    showNotification(currentLang === 'ru' ? 'Адрес скопирован!' : 'Address copied!', 'success');
-  });
-}
-
-// Quick deposit via TON Connect
-async function quickDeposit(amountTon) {
-  if (!tonConnectUI || !_tonConnectWallet) {
-    showNotification(currentLang === 'ru' ? 'Сначала подключите кошелёк' : 'Connect wallet first', 'error');
-    return;
-  }
-  await sendTonDeposit(amountTon);
-}
-
-async function quickDepositCustom() {
-  const input = document.getElementById('custom-deposit-amount');
-  const amount = parseFloat(input ? input.value : '0');
-  if (!amount || amount <= 0) {
-    showNotification(currentLang === 'ru' ? 'Введите сумму' : 'Enter amount', 'error');
-    return;
-  }
-  await quickDeposit(amount);
-}
-
-async function sendTonDeposit(amountTon) {
-  if (!tonConnectUI) return;
-  try {
-    const amountNano = Math.floor(amountTon * 1e9).toString();
-    const tx = {
-      validUntil: Math.floor(Date.now() / 1000) + 600,
-      messages: [{
-        address: PLATFORM_TON_ADDRESS,
-        amount: amountNano,
-        payload: '', // empty payload
-      }],
-    };
-
-    showNotification(currentLang === 'ru' ? 'Подтвердите транзакцию в кошельке...' : 'Confirm transaction in wallet...', 'info');
-
-    const result = await tonConnectUI.sendTransaction(tx);
-
-    if (result && result.boc) {
-      // Transaction sent — notify server to credit balance
-      // In production, server should verify on-chain; here we trust the client for demo
-      const txHash = result.boc; // BOC as identifier
-      const fromAddress = _tonConnectWallet?.account?.address || '';
-
-      const depositResult = await apiRequest('POST', '/api/balance/deposit', {
-        txHash,
-        fromAddress,
-        amountNano: Math.floor(amountTon * 1e9),
-      });
-
-      if (depositResult.ok) {
-        showNotification(
-          currentLang === 'ru'
-            ? `✅ Баланс пополнен на ${amountTon} TON!`
-            : `✅ Balance topped up by ${amountTon} TON!`,
-          'success'
-        );
-        await loadBalance();
-      } else {
-        showNotification(depositResult.error || 'Deposit error', 'error');
-      }
-    }
-  } catch (e) {
-    if (e.message && e.message.includes('User rejects')) {
-      showNotification(currentLang === 'ru' ? 'Транзакция отменена' : 'Transaction cancelled', 'info');
-    } else {
-      showNotification(e.message || 'Transaction error', 'error');
-    }
-  }
-}
-
-// Add balance to pageLoadFns
-pageLoadFns.balance = () => loadBalance();
 
 console.log('TON Agent Platform Dashboard v2.0 loaded successfully!');

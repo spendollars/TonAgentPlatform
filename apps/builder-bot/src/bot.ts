@@ -39,6 +39,8 @@ import {
   confirmPayment,
   getPendingPayment,
   verifyTonTransaction,
+  verifyTopupTransaction,
+  PLATFORM_WALLET,
   formatSubscription,
 } from './payments';
 
@@ -1289,6 +1291,7 @@ async function showProfile(ctx: Context, userId: number) {
     reply_markup: {
       inline_keyboard: [
         [
+          { text: lang === 'ru' ? '💳 Пополнить' : '💳 Top Up', callback_data: 'topup_start' },
           { text: `${peb('money')} ${lang === 'ru' ? 'Вывести' : 'Withdraw'}`, callback_data: 'withdraw_start' },
           { text: `${peb('link')} ${lang === 'ru' ? 'Привязать кошелёк' : 'Link wallet'}`, callback_data: 'profile_link_wallet' },
         ],
@@ -1304,6 +1307,64 @@ async function showProfile(ctx: Context, userId: number) {
     },
   });
 }
+
+
+// ── Пополнение баланса ───────────────────────
+const pendingTopup = new Map<number, { startTs: number }>();
+const processedTopupTx = new Set<string>();
+
+bot.action('topup_start', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from!.id;
+  const lang = getUserLang(userId);
+  pendingTopup.set(userId, { startTs: Math.floor(Date.now() / 1000) - 30 });
+  const comment = 'topup:' + userId;
+  const addr = PLATFORM_WALLET;
+  const ru = lang === 'ru';
+  const text =
+    (ru ? '💳 *Пополнение баланса*' : '💳 *Top Up Balance*') + '\n' +
+    '━━━━━━━━━━━━━━━━━━━━\n' +
+    (ru ? 'Отправьте TON на адрес платформы с комментарием:' : 'Send TON to platform address with this comment:') + '\n\n' +
+    '📬 *' + (ru ? 'Адрес:' : 'Address:') + '*\n`' + addr + '`\n\n' +
+    '💬 *' + (ru ? 'Комментарий \\\\(обязательно\\\\):' : 'Comment \\\\(required\\\\):') + '*\n`' + comment + '`\n\n' +
+    (ru ? '⚠️ _Без комментария зачисление невозможно\\\\!_' : '⚠️ _Without comment payment cannot be credited\\\\!_') + '\n' +
+    '━━━━━━━━━━━━━━━━━━━━\n' +
+    (ru ? 'После отправки нажмите кнопку проверки\\\\.' : 'After sending press the check button\\\\.');
+  await safeReply(ctx, text, {
+    parse_mode: 'MarkdownV2',
+    reply_markup: { inline_keyboard: [
+      [{ text: ru ? '✅ Проверить оплату' : '✅ Check payment', callback_data: 'check_topup' }],
+      [{ text: ru ? '← Назад к профилю' : '← Back to profile', callback_data: 'show_profile' }],
+    ]},
+  });
+});
+
+bot.action('check_topup', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from!.id;
+  const lang = getUserLang(userId);
+  const pending = pendingTopup.get(userId);
+  const result = await verifyTopupTransaction(userId, pending?.startTs);
+  if (!result.found || !result.txHash) {
+    await ctx.reply(lang === 'ru'
+      ? '❌ Платёж не найден. Отправьте TON с комментарием topup:' + userId + ' и подождите 30–60 сек.'
+      : '❌ Payment not found. Send TON with comment topup:' + userId + ' and wait 30–60 sec.');
+    return;
+  }
+  if (processedTopupTx.has(result.txHash)) {
+    await ctx.reply(lang === 'ru' ? '⚠️ Транзакция уже зачислена.' : '⚠️ Already credited.');
+    return;
+  }
+  processedTopupTx.add(result.txHash);
+  pendingTopup.delete(userId);
+  const p = await addUserBalance(userId, result.amountTon);
+  await ctx.reply(
+    lang === 'ru'
+      ? '✅ Пополнено *' + result.amountTon.toFixed(2) + ' TON*\n💰 Баланс: *' + p.balance_ton.toFixed(2) + ' TON*'
+      : '✅ Topped up *' + result.amountTon.toFixed(2) + ' TON*\n💰 Balance: *' + p.balance_ton.toFixed(2) + ' TON*',
+    { parse_mode: 'Markdown' }
+  );
+});
 
 // ── Withdraw flow ──
 bot.action('withdraw_start', async (ctx) => {
@@ -2192,7 +2253,7 @@ bot.on('callback_query', async (ctx) => {
       `• Модель: \`${process.env.CLAUDE_MODEL || 'claude-sonnet-4-5'}\`\n` +
       `• Прокси: \`${process.env.CLAUDE_BASE_URL || 'http://127.0.0.1:8317'}\`\n` +
       `• Безопасность: ${process.env.ENABLE_SECURITY_SCAN === 'false' ? '❌' : '✅'}\n` +
-      `• TON API Key: ${process.env.TONCENTER_API_KEY ? '✅ настроен' : '⚠️ не настроен'}`,
+      `• TON API Key: ${process.env.TONAPI_KEY ? '✅ настроен' : '⚠️ не настроен'}`,
       { parse_mode: 'Markdown' }
     );
     return;
