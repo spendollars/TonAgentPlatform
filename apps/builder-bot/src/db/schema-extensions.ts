@@ -161,6 +161,37 @@ export async function runMigrations(pool: Pool): Promise<void> {
       )
     `);
 
+    // user_balance
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS builder_bot.user_balance (
+        id               SERIAL PRIMARY KEY,
+        user_id          BIGINT NOT NULL UNIQUE,
+        balance_nano     BIGINT NOT NULL DEFAULT 0,
+        total_deposited  BIGINT NOT NULL DEFAULT 0,
+        total_spent      BIGINT NOT NULL DEFAULT 0,
+        updated_at       TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    // balance_transactions
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS builder_bot.balance_transactions (
+        id           SERIAL PRIMARY KEY,
+        user_id      BIGINT NOT NULL,
+        type         TEXT NOT NULL,
+        amount_nano  BIGINT NOT NULL,
+        tx_hash      TEXT,
+        from_address TEXT,
+        comment      TEXT,
+        status       TEXT NOT NULL DEFAULT 'pending',
+        created_at   TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS balance_tx_user_id_idx
+        ON builder_bot.balance_transactions (user_id, created_at DESC)
+    `);
+
     await client.query('COMMIT');
     console.log('✅ DB migrations applied (schema-extensions)');
   } catch (e) {
@@ -507,6 +538,147 @@ function deepMerge(target: Record<string, any>, source: Record<string, any>): Re
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Repository: UserBalanceRepository
+// ─────────────────────────────────────────────────────────────────────────────
+export class UserBalanceRepository {
+  private pool: Pool;
+
+  constructor(pool: Pool) {
+    this.pool = pool;
+  }
+
+  async getBalance(userId: number): Promise<{ balanceNano: number; totalDeposited: number; totalSpent: number }> {
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query<{
+        balance_nano: string; total_deposited: string; total_spent: string;
+      }>(
+        `SELECT balance_nano, total_deposited, total_spent
+         FROM builder_bot.user_balance WHERE user_id = $1`,
+        [userId]
+      );
+      if (!result.rows[0]) {
+        return { balanceNano: 0, totalDeposited: 0, totalSpent: 0 };
+      }
+      const row = result.rows[0];
+      return {
+        balanceNano:    Number(row.balance_nano),
+        totalDeposited: Number(row.total_deposited),
+        totalSpent:     Number(row.total_spent),
+      };
+    } finally {
+      client.release();
+    }
+  }
+
+  async addDeposit(userId: number, amountNano: number, txHash?: string, fromAddress?: string): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`
+        INSERT INTO builder_bot.user_balance (user_id, balance_nano, total_deposited, updated_at)
+        VALUES ($1, $2, $2, NOW())
+        ON CONFLICT (user_id) DO UPDATE SET
+          balance_nano    = builder_bot.user_balance.balance_nano + $2,
+          total_deposited = builder_bot.user_balance.total_deposited + $2,
+          updated_at      = NOW()
+      `, [userId, amountNano]);
+      await client.query(`
+        INSERT INTO builder_bot.balance_transactions
+          (user_id, type, amount_nano, tx_hash, from_address, status, created_at)
+        VALUES ($1, 'deposit', $2, $3, $4, 'confirmed', NOW())
+      `, [userId, amountNano, txHash || null, fromAddress || null]);
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  async spendBalance(userId: number, amountNano: number, comment?: string): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query<{ balance_nano: string }>(
+        `SELECT balance_nano FROM builder_bot.user_balance WHERE user_id = $1 FOR UPDATE`,
+        [userId]
+      );
+      const current = result.rows[0] ? Number(result.rows[0].balance_nano) : 0;
+      if (current < amountNano) {
+        await client.query('ROLLBACK');
+        return false;
+      }
+      await client.query(`
+        UPDATE builder_bot.user_balance
+        SET balance_nano = balance_nano - $2,
+            total_spent  = total_spent + $2,
+            updated_at   = NOW()
+        WHERE user_id = $1
+      `, [userId, amountNano]);
+      await client.query(`
+        INSERT INTO builder_bot.balance_transactions
+          (user_id, type, amount_nano, comment, status, created_at)
+        VALUES ($1, 'spend', $2, $3, 'confirmed', NOW())
+      `, [userId, amountNano, comment || null]);
+      await client.query('COMMIT');
+      return true;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getTransactions(userId: number, limit = 20): Promise<Array<{
+    id: number; type: string; amountNano: number; txHash: string | null;
+    fromAddress: string | null; comment: string | null; status: string; createdAt: Date;
+  }>> {
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query<{
+        id: number; type: string; amount_nano: string; tx_hash: string | null;
+        from_address: string | null; comment: string | null; status: string; created_at: Date;
+      }>(
+        `SELECT id, type, amount_nano, tx_hash, from_address, comment, status, created_at
+         FROM builder_bot.balance_transactions
+         WHERE user_id = $1
+         ORDER BY created_at DESC
+         LIMIT $2`,
+        [userId, limit]
+      );
+      return result.rows.map(r => ({
+        id: r.id,
+        type: r.type,
+        amountNano: Number(r.amount_nano),
+        txHash: r.tx_hash,
+        fromAddress: r.from_address,
+        comment: r.comment,
+        status: r.status,
+        createdAt: r.created_at,
+      }));
+    } finally {
+      client.release();
+    }
+  }
+
+  async txExists(txHash: string): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query(
+        `SELECT id FROM builder_bot.balance_transactions WHERE tx_hash = $1 LIMIT 1`,
+        [txHash]
+      );
+      return result.rows.length > 0;
+    } finally {
+      client.release();
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Singleton factories (same pattern as AgentsRepository in db/agents.ts)
 // ─────────────────────────────────────────────────────────────────────────────
 let agentStateRepo: AgentStateRepository | null = null;
@@ -560,9 +732,20 @@ export function getUserSettingsRepository(): UserSettingsRepository {
   return userSettingsRepo;
 }
 
+let userBalanceRepo: UserBalanceRepository | null = null;
+
+export function initUserBalanceRepository(pool: Pool): UserBalanceRepository {
+  if (!userBalanceRepo) userBalanceRepo = new UserBalanceRepository(pool);
+  return userBalanceRepo;
+}
+export function getUserBalanceRepository(): UserBalanceRepository {
+  if (!userBalanceRepo) throw new Error('UserBalanceRepository not initialized');
+  return userBalanceRepo;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Таблица 6: marketplace_listings
-// Таблица 7: marketplace_purchases
+// Таблица 8: marketplace_listings
+// Таблица 9: marketplace_purchases
 // ─────────────────────────────────────────────────────────────────────────────
 export const marketplaceListingsTable = builderSchema.table('marketplace_listings', {
   id:          serial('id').primaryKey(),

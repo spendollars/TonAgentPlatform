@@ -25,6 +25,7 @@
   --text-muted: #64748b;
   
   --border: rgba(148, 163, 184, 0.1);
+  --border-subtle: rgba(148, 163, 184, 0.06);
   --border-hover: rgba(148, 163, 184, 0.2);
   
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -2050,3 +2051,330 @@ select.form-input option {
 .loading-placeholder { color: var(--text-muted); font-size: 0.85rem; padding: 20px 0; text-align: center; }
 .empty-state { text-align: center; padding: 30px 20px; color: var(--text-muted); }
 .empty-state p { margin-bottom: 12px; }
+
+/* ===== BALANCE PAGE ===== */
+
+/* Sidebar Balance Widget */
+.sidebar-balance-widget {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(139,92,246,0.12) 100%);
+  border: 1px solid rgba(59,130,246,0.25);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  margin-bottom: 10px;
+}
+.sidebar-balance-widget:hover {
+  background: linear-gradient(135deg, rgba(59,130,246,0.2) 0%, rgba(139,92,246,0.2) 100%);
+  border-color: rgba(59,130,246,0.4);
+  transform: translateY(-1px);
+}
+.sidebar-balance-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(59,130,246,0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+.sidebar-balance-info {
+  flex: 1;
+  min-width: 0;
+}
+.sidebar-balance-label {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 500;
+}
+.sidebar-balance-value {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--primary-light);
+  font-family: 'JetBrains Mono', monospace;
+}
+.sidebar-balance-action {
+  color: var(--primary);
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+/* Balance Nav Badge */
+.balance-nav-badge {
+  margin-left: auto;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--primary-light);
+  font-family: 'JetBrains Mono', monospace;
+  background: rgba(59,130,246,0.15);
+  padding: 2px 7px;
+  border-radius: 10px;
+  border: 1px solid rgba(59,130,246,0.2);
+}
+
+/* Balance Cards Grid */
+.balance-cards-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+@media (max-width: 900px) {
+  .balance-cards-grid { grid-template-columns: 1fr; }
+}
+
+/* Main Balance Card */
+.balance-main-card {
+  position: relative;
+  background: linear-gradient(135deg, rgba(59,130,246,0.15) 0%, rgba(139,92,246,0.15) 50%, rgba(6,182,212,0.1) 100%);
+  border: 1px solid rgba(59,130,246,0.3);
+  border-radius: var(--radius-lg);
+  padding: 2rem;
+  overflow: hidden;
+}
+.balance-card-glow {
+  position: absolute;
+  top: -40px;
+  right: -40px;
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(circle, rgba(59,130,246,0.2) 0%, transparent 70%);
+  pointer-events: none;
+}
+.balance-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+.balance-card-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: rgba(59,130,246,0.2);
+  border: 1px solid rgba(59,130,246,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary-light);
+  flex-shrink: 0;
+}
+.balance-card-label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 500;
+  margin-bottom: 0.4rem;
+}
+.balance-card-amount {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.balance-ton-value {
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  line-height: 1;
+}
+.balance-ton-symbol {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--primary-light);
+}
+.balance-usd-equiv {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+.balance-card-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+.balance-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.balance-stat-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.balance-stat-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Deposit Card */
+.deposit-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.deposit-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.deposit-card-header h3 {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+.deposit-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: rgba(16,185,129,0.15);
+  color: var(--success);
+  border: 1px solid rgba(16,185,129,0.3);
+}
+
+/* TON Connect Section */
+.tonconnect-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+.tonconnect-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Deposit Divider */
+.deposit-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+.deposit-divider::before,
+.deposit-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Deposit Address */
+.deposit-address-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.deposit-address-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 500;
+}
+.deposit-address-box {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  position: relative;
+}
+.deposit-address-dns {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--primary-light);
+  font-family: 'JetBrains Mono', monospace;
+}
+.deposit-address-raw {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  word-break: break-all;
+}
+.deposit-copy-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+}
+.deposit-note {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* Quick Deposit */
+.quick-deposit-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.quick-deposit-amounts {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+}
+.quick-amount-btn {
+  padding: 0.5rem;
+  background: rgba(59,130,246,0.1);
+  border: 1px solid rgba(59,130,246,0.25);
+  border-radius: var(--radius-sm);
+  color: var(--primary-light);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: 'JetBrains Mono', monospace;
+}
+.quick-amount-btn:hover {
+  background: rgba(59,130,246,0.2);
+  border-color: rgba(59,130,246,0.4);
+  transform: translateY(-1px);
+}
+.custom-deposit-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.custom-deposit-row .form-input {
+  flex: 1;
+}
+
+/* TON Connect UI button override */
+#ton-connect-button-container {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+#ton-connect-button-container tc-root {
+  width: 100%;
+}
+#ton-connect-button-container button {
+  width: 100% !important;
+  justify-content: center !important;
+}

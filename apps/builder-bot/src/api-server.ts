@@ -15,12 +15,15 @@ import {
   getUserPluginsRepository,
   getUserSettingsRepository,
   getMarketplaceRepository,
+  getUserBalanceRepository,
 } from './db/schema-extensions';
 
 const PORT = parseInt(process.env.API_PORT || '3001', 10);
 const BOT_TOKEN = process.env.BOT_TOKEN || '';
 const BOT_USERNAME = process.env.BOT_USERNAME || 'TonAgentPlatformBot';
 const LANDING_URL = process.env.LANDING_URL || `http://localhost:${PORT}`;
+// Адрес платформы для приёма депозитов
+const PLATFORM_TON_ADDRESS = process.env.PLATFORM_TON_ADDRESS || 'UQCfRrLVr7MeGbVw4x1XgZ42ZUS7tdf2sEYSyRvmoEB4y_dh';
 
 // ── In-memory session store: token → userId ──────────────────
 const sessions = new Map<string, { userId: number; username: string; firstName: string; expiresAt: number }>();
@@ -646,6 +649,83 @@ export function startApiServer() {
       res.json({ ok: true, canView });
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  // ── GET /api/balance — внутренний баланс пользователя ──
+  app.get('/api/balance', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId as number;
+      const balance = await getUserBalanceRepository().getBalance(userId);
+      // Конвертируем нанотоны в TON для отображения
+      const balanceTon = balance.balanceNano / 1e9;
+      const totalDepositedTon = balance.totalDeposited / 1e9;
+      const totalSpentTon = balance.totalSpent / 1e9;
+      res.json({
+        ok: true,
+        balanceNano: balance.balanceNano,
+        balanceTon: parseFloat(balanceTon.toFixed(4)),
+        totalDepositedTon: parseFloat(totalDepositedTon.toFixed(4)),
+        totalSpentTon: parseFloat(totalSpentTon.toFixed(4)),
+        depositAddress: PLATFORM_TON_ADDRESS,
+        depositAddressDns: 'agentplatform.ton',
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── GET /api/balance/transactions — история транзакций ──
+  app.get('/api/balance/transactions', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId as number;
+      const limit = parseInt(req.query.limit as string || '20', 10);
+      const txs = await getUserBalanceRepository().getTransactions(userId, limit);
+      res.json({
+        ok: true,
+        transactions: txs.map(t => ({
+          ...t,
+          amountTon: parseFloat((t.amountNano / 1e9).toFixed(4)),
+        })),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── POST /api/balance/deposit — зачислить депозит (после верификации TON транзакции) ──
+  // Body: { txHash, fromAddress, amountNano }
+  // В продакшне это должно вызываться только после верификации on-chain
+  app.post('/api/balance/deposit', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId as number;
+      const { txHash, fromAddress, amountNano } = req.body as {
+        txHash?: string; fromAddress?: string; amountNano: number;
+      };
+
+      if (!amountNano || amountNano <= 0) {
+        res.status(400).json({ error: 'amountNano must be positive' });
+        return;
+      }
+
+      // Дедупликация: не зачислять одну транзакцию дважды
+      if (txHash) {
+        const exists = await getUserBalanceRepository().txExists(txHash);
+        if (exists) {
+          res.status(409).json({ error: 'Transaction already processed' });
+          return;
+        }
+      }
+
+      await getUserBalanceRepository().addDeposit(userId, amountNano, txHash, fromAddress);
+      const balance = await getUserBalanceRepository().getBalance(userId);
+      res.json({
+        ok: true,
+        balanceTon: parseFloat((balance.balanceNano / 1e9).toFixed(4)),
+        balanceNano: balance.balanceNano,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
   });
 

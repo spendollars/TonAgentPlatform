@@ -16,6 +16,7 @@ import {
   initUserPluginsRepository,
   initUserSettingsRepository,
   initMarketplaceRepository,
+  initUserBalanceRepository,
 } from './schema-extensions';
 
 // Конфигурация PostgreSQL
@@ -58,6 +59,7 @@ export async function initDatabase() {
     initUserPluginsRepository(pool);
     initUserSettingsRepository(pool);
     initMarketplaceRepository(pool); // маркетплейс
+    initUserBalanceRepository(pool); // внутренний баланс пользователей
 
     console.log('✅ Database repositories initialized');
 
