@@ -9,21 +9,48 @@ import {
   getExecutionHistoryRepository,
 } from '../../db/schema-extensions';
 
-// ── Sanitizer: fix literal newlines inside string literals ──────────────────
-// AI code generators sometimes emit actual \n characters inside quoted strings
-// instead of the escape sequence \\n, causing SyntaxError "Unterminated string".
+// ── Sanitizer: fix common AI code generation issues ──────────────────────────
+// 1. Fixes literal newlines inside string literals (SyntaxError "Unterminated string")
+// 2. Fixes invalid escape sequences like \" inside single-quoted strings
+//    (SyntaxError "Expecting Unicode escape sequence \uXXXX")
+// 3. Fixes literal \n sequences (\\n in source) that should be escape sequences
 function fixLiteralNewlinesInStrings(code: string): string {
   let result = '';
   let i = 0;
   while (i < code.length) {
     const ch = code[i];
-    if (ch === "'" || ch === '"') {
-      const quote = ch;
+    if (ch === "'") {
+      // Single-quoted string: fix literal newlines AND invalid escape sequences
+      result += ch; i++;
+      while (i < code.length) {
+        const c = code[i];
+        if (c === '\\') {
+          const next = code[i + 1] || '';
+          // Valid JS escape sequences in single-quoted strings:
+          // \n \r \t \\ \' \0 \b \f \v \uXXXX \xXX
+          const validEscapes = new Set(['n', 'r', 't', '\\', "'", '0', 'b', 'f', 'v', 'u', 'x', '\n', '\r']);
+          if (validEscapes.has(next)) {
+            result += c + next; i += 2;
+          } else if (next === '"') {
+            // \" inside single-quoted string is invalid — just use "
+            result += '"'; i += 2;
+          } else {
+            // Unknown escape — just output the character without backslash
+            result += next; i += 2;
+          }
+        }
+        else if (c === "'") { result += c; i++; break; }
+        else if (c === '\n') { result += '\\n'; i++; }
+        else if (c === '\r') { i++; }
+        else { result += c; i++; }
+      }
+    } else if (ch === '"') {
+      // Double-quoted string
       result += ch; i++;
       while (i < code.length) {
         const c = code[i];
         if (c === '\\') { result += c + (code[i + 1] || ''); i += 2; }
-        else if (c === quote) { result += c; i++; break; }
+        else if (c === '"') { result += c; i++; break; }
         else if (c === '\n') { result += '\\n'; i++; }
         else if (c === '\r') { i++; }
         else { result += c; i++; }
@@ -348,6 +375,149 @@ export class ExecutionTools {
             if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
             const data = await res.json() as any;
             return data[id]?.usd ?? 0;
+          },
+
+          // ── searchNFTCollection(name) — найти NFT коллекцию по имени ──
+          // Возвращает { address, name, floorTon, items } или null если не найдено
+          searchNFTCollection: async (name: string): Promise<{ address: string; name: string; floorTon: number; items: number } | null> => {
+            const nameLower = name.toLowerCase().trim();
+            const slug = nameLower.replace(/[^a-z0-9]/g, '');
+
+            // Метод 1: GetGems GraphQL (работает с правильными заголовками)
+            try {
+              const gqlBody = JSON.stringify({
+                query: `{ alphaNftCollectionSearch(query: "${name.replace(/['"\\]/g, '')}", count: 3) { items { address name floorPrice approximateItemsCount } } }`
+              });
+              const resp = await nativeFetch('https://api.getgems.io/graphql', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json',
+                  'Origin': 'https://getgems.io',
+                  'Referer': 'https://getgems.io/',
+                  'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                },
+                body: gqlBody,
+              });
+              if (resp.ok) {
+                const data = await resp.json() as any;
+                const items = data?.data?.alphaNftCollectionSearch?.items || [];
+                if (items.length > 0) {
+                  const col = items[0];
+                  return {
+                    address: col.address,
+                    name: col.name || name,
+                    floorTon: col.floorPrice ? parseInt(col.floorPrice) / 1e9 : 0,
+                    items: col.approximateItemsCount || 0,
+                  };
+                }
+              }
+            } catch {}
+
+            // Метод 2: Fragment Telegram Gifts — для коллекций типа "Cupid Charm", "Lol Pop" и т.д.
+            // Slug = имя без пробелов/спецсимволов в нижнем регистре
+            // Адрес получаем через TonAPI поиск по raw_collection_content
+            try {
+              // Проверяем что Fragment знает эту коллекцию
+              const fragResp = await nativeFetch(
+                `https://nft.fragment.com/collection/${slug}.json`,
+                { headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' } }
+              );
+              if (fragResp.ok) {
+                const fragMeta = await fragResp.json() as any;
+                if (fragMeta?.name) {
+                  // Fragment знает коллекцию — ищем адрес через TonAPI
+                  // raw_collection_content содержит URL метаданных в hex
+                  // Ищем hex-encoded строку с slug
+                  const slugHex = Buffer.from(slug).toString('hex');
+                  for (let offset = 0; offset < 500; offset += 100) {
+                    const resp = await nativeFetch(
+                      `https://tonapi.io/v2/nfts/collections?limit=100&offset=${offset}`,
+                      { headers: { 'Accept': 'application/json' } }
+                    );
+                    if (!resp.ok) break;
+                    const data = await resp.json() as any;
+                    const cols: any[] = data?.nft_collections || [];
+                    if (cols.length === 0) break;
+                    const found = cols.find((c: any) =>
+                      (c?.raw_collection_content || '').includes(slugHex)
+                    );
+                    if (found) {
+                      return {
+                        address: found.address,
+                        name: fragMeta.name || name,
+                        floorTon: 0,
+                        items: found.next_item_index || 0,
+                      };
+                    }
+                  }
+                }
+              }
+            } catch {}
+
+            // Метод 3: TonAPI — поиск по имени в metadata
+            try {
+              for (let offset = 0; offset < 300; offset += 100) {
+                const resp = await nativeFetch(
+                  `https://tonapi.io/v2/nfts/collections?limit=100&offset=${offset}`,
+                  { headers: { 'Accept': 'application/json' } }
+                );
+                if (!resp.ok) break;
+                const data = await resp.json() as any;
+                const cols: any[] = data?.nft_collections || [];
+                if (cols.length === 0) break;
+                const found = cols.find((c: any) => {
+                  const colName = (c?.metadata?.name || '').toLowerCase();
+                  return colName.includes(nameLower) || nameLower.includes(colName);
+                });
+                if (found) {
+                  return {
+                    address: found.address,
+                    name: found?.metadata?.name || name,
+                    floorTon: 0,
+                    items: found.next_item_index || 0,
+                  };
+                }
+              }
+            } catch {}
+
+            return null;
+          },
+
+          // ── getNFTFloorPrice(address) — floor price коллекции по адресу ──
+          // Возвращает floor price в TON (0 если нет листингов)
+          getNFTFloorPrice: async (address: string): Promise<number> => {
+            try {
+              // Конвертируем EQ адрес в raw формат
+              let rawAddr = address;
+              if (address && !address.startsWith('0:')) {
+                try {
+                  const s = address.replace(/-/g, '+').replace(/_/g, '/');
+                  const padded = s + '=='.slice(0, (4 - s.length % 4) % 4);
+                  const buf = Buffer.from(padded, 'base64');
+                  rawAddr = '0:' + buf.slice(2, 34).toString('hex');
+                } catch {}
+              }
+              const prices: number[] = [];
+              for (let offset = 0; offset < 200; offset += 100) {
+                const r = await nativeFetch(
+                  `https://tonapi.io/v2/nfts/collections/${rawAddr}/items?limit=100&offset=${offset}`,
+                  { headers: { 'Accept': 'application/json' } }
+                );
+                if (!r.ok) break;
+                const d = await r.json() as any;
+                const items: any[] = d.nft_items || [];
+                if (items.length === 0) break;
+                for (const item of items) {
+                  const val = item?.sale?.price?.value;
+                  if (val && parseInt(val) > 0) prices.push(parseInt(val) / 1e9);
+                }
+              }
+              prices.sort((a: number, b: number) => a - b);
+              return prices.length > 0 ? prices[0] : 0;
+            } catch {
+              return 0;
+            }
           },
 
           // ── Cross-agent messaging (OpenClaw sessions_send pattern) ──
