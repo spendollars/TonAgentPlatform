@@ -1,5 +1,6 @@
 import { Telegraf, Context, Markup } from 'telegraf';
 import { message } from 'telegraf/filters';
+import { pe, peb, escHtml, div } from './premium-emoji';
 import { getOrchestrator, MODEL_LIST, getUserModel, setUserModel, type ModelId } from './agents/orchestrator';
 import {
   authSendPhone, authSubmitCode, authSubmitPassword,
@@ -70,21 +71,25 @@ function esc(text: string | number | null | undefined): string {
     .replace(/!/g, '\\!');
 }
 
-// Безопасный reply — пробуем MarkdownV2, при ошибке — plain text
+// Безопасный reply — пробуем MarkdownV2 (или HTML если указан), при ошибке — plain text
 async function safeReply(ctx: Context, text: string, extra?: object): Promise<void> {
+  const extraObj: any = extra || {};
+  // Если parse_mode уже задан в extra — используем его, иначе MarkdownV2
+  const parseMode = extraObj.parse_mode || 'MarkdownV2';
   try {
-    await ctx.reply(text, { parse_mode: 'MarkdownV2', ...(extra || {}) });
+    await ctx.reply(text, { parse_mode: parseMode, ...extraObj });
   } catch (err: any) {
     // При ошибке парсинга — убираем разметку и отправляем plain
     if (err?.response?.error_code === 400) {
-      const plain = text.replace(/\\([_*[\]()~`>#+\-=|{}.!\\])/g, '$1').replace(/[*_`]/g, '');
-      // Убираем parse_mode из extra чтобы plain text не парсился
-      const plainExtra: any = { ...(extra || {}) };
+      // Убираем HTML/Markdown теги для plain text
+      const plain = parseMode === 'HTML'
+        ? text.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+        : text.replace(/\\([_*[\]()~`>#+\-=|{}.!\\])/g, '$1').replace(/[*_`]/g, '');
+      const plainExtra: any = { ...extraObj };
       delete plainExtra.parse_mode;
       try {
         await ctx.reply(plain, plainExtra);
       } catch {
-        // Последний шанс — без extra совсем
         await ctx.reply(plain).catch(() => {});
       }
     } else {
@@ -176,19 +181,23 @@ async function startCreationAnimation(
 async function editOrReply(ctx: Context, text: string, extra?: object): Promise<void> {
   const chatId = ctx.chat?.id;
   const msgId = ctx.callbackQuery && 'message' in ctx.callbackQuery ? ctx.callbackQuery.message?.message_id : undefined;
+  const extraObj: any = extra || {};
+  const parseMode = extraObj.parse_mode || 'MarkdownV2';
 
   if (chatId && msgId) {
     // Callback — пробуем редактировать
     try {
-      await ctx.telegram.editMessageText(chatId, msgId, undefined, text, { parse_mode: 'MarkdownV2', ...(extra || {}) } as any);
+      await ctx.telegram.editMessageText(chatId, msgId, undefined, text, { parse_mode: parseMode, ...extraObj } as any);
       return;
     } catch (editErr: any) {
       // Если текст не изменился (400) — не страшно
       if (editErr?.response?.error_code === 400 && editErr?.description?.includes('message is not modified')) return;
       // Иначе пробуем plain text редактирование (без parse_mode)
       try {
-        const plain = text.replace(/\\([_*[\]()~`>#+\-=|{}.!\\])/g, '$1').replace(/[*_`]/g, '');
-        const plainExtra: any = { ...(extra || {}) };
+        const plain = parseMode === 'HTML'
+          ? text.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+          : text.replace(/\\([_*[\]()~`>#+\-=|{}.!\\])/g, '$1').replace(/[*_`]/g, '');
+        const plainExtra: any = { ...extraObj };
         delete plainExtra.parse_mode;
         await ctx.telegram.editMessageText(chatId, msgId, undefined, plain, plainExtra as any);
         return;
@@ -202,12 +211,13 @@ async function editOrReply(ctx: Context, text: string, extra?: object): Promise<
   await safeReply(ctx, text, extra);
 }
 
-// Убрать XML теги от Kiro/Claude прокси
+// Убрать XML теги от Kiro/Claude прокси (но НЕ трогать <tg-emoji> теги)
 function sanitize(text: string): string {
   return text
-    .replace(/<[a-zA-Z_][a-zA-Z0-9_]*>[\s\S]*?<\/[a-zA-Z_][a-zA-Z0-9_]*>/g, '')
-    .replace(/<[a-zA-Z_][a-zA-Z0-9_]*\s*\/>/g, '')
-    .replace(/<[a-zA-Z_][a-zA-Z0-9_]*[^>]*>/g, '')
+    // Убираем только не-tg-emoji XML теги (от AI-прокси)
+    .replace(/<(?!tg-emoji)[a-zA-Z_][a-zA-Z0-9_]*>[\s\S]*?<\/(?!tg-emoji)[a-zA-Z_][a-zA-Z0-9_]*>/g, '')
+    .replace(/<(?!tg-emoji)[a-zA-Z_][a-zA-Z0-9_]*\s*\/>/g, '')
+    .replace(/<(?!tg-emoji)[a-zA-Z_][a-zA-Z0-9_]*(?!\s*emoji)[^>]*>/g, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -217,12 +227,26 @@ function sanitize(text: string): string {
 // ============================================================
 const bot = new Telegraf(process.env.BOT_TOKEN || '');
 
+// Статичное меню (русский по умолчанию)
 const MAIN_MENU = Markup.keyboard([
   ['🤖 Мои агенты', '➕ Создать агента'],
   ['🏪 Маркетплейс', '🔌 Плагины', '⚡ Workflow'],
   ['💎 TON Connect', '💳 Подписка', '📊 Статистика'],
   ['👤 Профиль', '❓ Помощь'],
 ]).resize();
+
+// Динамическое меню с учётом языка
+function getMainMenu(lang: 'ru' | 'en') {
+  if (lang === 'en') {
+    return Markup.keyboard([
+      ['🤖 My Agents', '➕ Create Agent'],
+      ['🏪 Marketplace', '🔌 Plugins', '⚡ Workflow'],
+      ['💎 TON Connect', '💳 Subscription', '📊 Stats'],
+      ['👤 Profile', '❓ Help'],
+    ]).resize();
+  }
+  return MAIN_MENU;
+}
 
 // ============================================================
 // Хранилище агентских кошельков (in-memory, будет в БД позже)
@@ -461,64 +485,68 @@ async function showWelcome(ctx: Context, userId: number, name: string, lang: 'ru
 
   const statsLine = stats
     ? (lang === 'ru'
-        ? `\n🌍 *Платформа:* ${esc(String(stats.totalAgents))} агентов \\| ${esc(String(stats.activeAgents))} активны\n`
-        : `\n🌍 *Platform:* ${esc(String(stats.totalAgents))} agents \\| ${esc(String(stats.activeAgents))} active\n`)
+        ? `\n${pe('globe')} <b>Платформа:</b> ${stats.totalAgents} агентов | ${stats.activeAgents} активны\n`
+        : `\n${pe('globe')} <b>Platform:</b> ${stats.totalAgents} agents | ${stats.activeAgents} active\n`)
     : '\n';
 
   // Живая цена TON в приветствии — вау-момент
   let priceLine = '';
   if (price) {
-    const arrow = price.change24h >= 0 ? '📈' : '📉';
-    const sign = price.change24h >= 0 ? '\\+' : '';
+    const arrow = price.change24h >= 0 ? pe('trending') : '📉';
+    const sign = price.change24h >= 0 ? '+' : '';
     priceLine =
-      `\n💎 *TON сейчас:* $${esc(price.usd.toFixed(2))} ${arrow} ${sign}${esc(price.change24h.toFixed(1))}% за 24ч\n`;
+      `\n${pe('diamond')} <b>TON сейчас:</b> $${price.usd.toFixed(2)} ${arrow} ${sign}${price.change24h.toFixed(1)}% за 24ч\n`;
   }
 
   const examples = lang === 'ru'
     ? [
-        '_"Следи за floor price TON Punks и пришли AI\\-прогноз"_',
-        '_"Уведоми когда мой кошелёк опустится ниже 5 TON"_',
-        '_"Алерт когда цена TON упадёт ниже \\$4"_',
+        `<i>"Следи за floor price TON Punks и пришли AI-прогноз"</i>`,
+        `<i>"Уведоми когда мой кошелёк опустится ниже 5 TON"</i>`,
+        `<i>"Алерт когда цена TON упадёт ниже $4"</i>`,
       ]
     : [
-        '_"Track TON Punks floor price and send AI forecast"_',
-        '_"Alert me when my wallet drops below 5 TON"_',
-        '_"Notify me when TON price falls below \\$4"_',
+        `<i>"Track TON Punks floor price and send AI forecast"</i>`,
+        `<i>"Alert me when my wallet drops below 5 TON"</i>`,
+        `<i>"Notify me when TON price falls below $4"</i>`,
       ];
 
   const text = lang === 'ru'
-    ? `✨ *Добро пожаловать, ${esc(name)}\\!*\n\n` +
-      `*TON Agent Platform* \\— пишешь задачу словами,\n` +
-      `AI создаёт агента, который работает 24/7\\.` +
+    ? `${pe('sparkles')} <b>Добро пожаловать, ${escHtml(name)}!</b>\n\n` +
+      `<b>TON Agent Platform</b> — пишешь задачу словами,\n` +
+      `AI создаёт агента, который работает 24/7.` +
       statsLine + priceLine +
-      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `💬 *Просто напиши задачу\\. Примеры:*\n\n` +
+      `${div()}\n` +
+      `${pe('brain')} <b>Просто напиши задачу. Примеры:</b>\n\n` +
       examples.map(e => `• ${e}`).join('\n') + '\n\n' +
-      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `⚡ Агент запустится автоматически через 30 сек`
-    : `✨ *Welcome, ${esc(name)}\\!*\n\n` +
-      `*TON Agent Platform* \\— describe a task in plain text,\n` +
-      `AI creates an agent that runs 24/7\\.` +
+      `${div()}\n` +
+      `${pe('bolt')} Агент запустится автоматически через 30 сек`
+    : `${pe('sparkles')} <b>Welcome, ${escHtml(name)}!</b>\n\n` +
+      `<b>TON Agent Platform</b> — describe a task in plain text,\n` +
+      `AI creates an agent that runs 24/7.` +
       statsLine + priceLine +
-      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `💬 *Just type your task\\. Examples:*\n\n` +
+      `${div()}\n` +
+      `${pe('brain')} <b>Just type your task. Examples:</b>\n\n` +
       examples.map(e => `• ${e}`).join('\n') + '\n\n' +
-      `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `⚡ Agent auto\\-starts within 30 seconds`;
+      `${div()}\n` +
+      `${pe('bolt')} Agent auto-starts within 30 seconds`;
 
-  await safeReply(ctx, text, MAIN_MENU);
+  await safeReply(ctx, text, { ...getMainMenu(lang), parse_mode: 'HTML' });
   await ctx.reply(
-    lang === 'ru' ? '👇 Или выберите действие:' : '👇 Or choose an action:',
+    lang === 'ru' ? `${peb('finger')} Или выберите действие:` : `${peb('finger')} Or choose an action:`,
     {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: lang === 'ru' ? '✍️ Написать задачу' : '✍️ Describe task', callback_data: 'create_agent_prompt' },
-            { text: '💎 /price', callback_data: 'live_price' },
+            { text: `${peb('plus')} ${lang === 'ru' ? 'Написать задачу' : 'Describe task'}`, callback_data: 'create_agent_prompt' },
+            { text: `${peb('diamond')} ${lang === 'ru' ? 'Цена TON' : 'TON Price'}`, callback_data: 'live_price' },
           ],
           [
-            { text: '🏪 Marketplace', callback_data: 'marketplace' },
-            { text: lang === 'ru' ? '👤 Профиль' : '👤 Profile', callback_data: 'show_profile' },
+            { text: `${peb('store')} ${lang === 'ru' ? 'Маркетплейс' : 'Marketplace'}`, callback_data: 'marketplace' },
+            { text: `👤 ${lang === 'ru' ? 'Профиль' : 'Profile'}`, callback_data: 'show_profile' },
+          ],
+          [
+            { text: `${peb('robot')} ${lang === 'ru' ? 'Мои агенты' : 'My agents'}`, callback_data: 'list_agents' },
+            { text: `${peb('plugin')} ${lang === 'ru' ? 'Плагины' : 'Plugins'}`, callback_data: 'plugins_menu' },
           ],
         ],
       },
@@ -648,7 +676,7 @@ async function sendPriceCard(ctx: Context) {
 
     const text =
       `💎 *TON / USD*\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `💰 *$${esc(usd.toFixed(4))}*\n` +
       `${arrow} ${sign}${esc(chg24.toFixed(2))}% ${lang === 'ru' ? 'за 24ч' : '24h change'}\n\n` +
       `📊 ${lang === 'ru' ? 'Объём' : 'Volume'} 24h: *${esc(fmtB(vol))}*\n` +
@@ -728,7 +756,7 @@ bot.command('portfolio', async (ctx) => {
 
     const text =
       `👛 *${lang === 'ru' ? 'Кошелёк' : 'Wallet'} ${esc(short)}*\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `💰 *${esc(balTON.toFixed(4))} TON*${usdVal}\n` +
       `🕐 ${lang === 'ru' ? 'Последняя транзакция' : 'Last transaction'}: ${esc(lastTx)}\n` +
       `🔗 \`${esc(addr)}\``;
@@ -808,7 +836,7 @@ bot.command('gifts', async (ctx) => {
       return;
     }
 
-    let msg = '🎁 *Fragment Gifts — Floor Prices*\n━━━━━━━━━━━━━━━━━━━━\n\n';
+    let msg = `🎁 *Fragment Gifts — Floor Prices*\n${div()}\n\n`;
     for (const g of gifts) {
       msg += `${g.emoji} ${esc(g.name)}\n`;
       msg += `  💰 Floor: \`${g.floorStars} ⭐\` ≈ \`${g.floorTon.toFixed(3)} TON\`\n`;
@@ -851,7 +879,7 @@ bot.command('config', async (ctx) => {
     if (!keys.length) {
       return safeReply(ctx,
         `📋 *Ваши переменные*\n` +
-        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `${div()}\n` +
         `_Пока ничего нет\\._\n\n` +
         `Добавьте ключи API, адреса кошельков:\n` +
         `\`/config set WALLET\\_ADDR EQ\\.\\.\\.\`\n\n` +
@@ -862,7 +890,7 @@ bot.command('config', async (ctx) => {
     const lines = keys.map(k => `\`${esc(k)}\` \\= \`${esc(String(vars[k]).slice(0, 40))}${vars[k].length > 40 ? '\\.\\.\\.' : ''}\``).join('\n');
     return safeReply(ctx,
       `📋 *Ваши переменные* \\(${esc(String(keys.length))}\\)\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `${lines}\n\n` +
       `_Доступны в агентах как \`context\\.config\\.KEY\`_`,
       { parse_mode: 'MarkdownV2' }
@@ -1100,22 +1128,22 @@ bot.command('create', async (ctx) => {
 // ============================================================
 // Нижнее меню (кнопки)
 // ============================================================
+// ── Русские кнопки клавиатуры ──
 bot.hears('🤖 Мои агенты', (ctx) => showAgentsList(ctx, ctx.from.id));
-bot.hears('➕ Создать агента', (ctx) =>
-  safeReply(ctx,
-    `✨ *Создание агента*\n\n` +
-    `Опишите задачу своими словами — AI сам напишет код\n` +
-    `и запустит агента на нашем сервере\\.\n\n` +
-    `*Примеры задач:*\n` +
-    `💎 _"Проверяй баланс UQB5\\.\\.\\. каждый час"_\n` +
-    `📈 _"Следи за ценой TON, уведоми если выше 5\\$"_\n` +
-    `💸 _"Каждое 10\\-е число отправляй 100 TON на UQ\\.\\.\\."_\n` +
-    `🌐 _"Проверяй доступность сайта каждые 5 минут"_\n` +
-    `📊 _"Получай курс BTC каждое утро в 9:00"_\n\n` +
-    `👇 *Напишите вашу задачу:*`,
-    MAIN_MENU
-  )
-);
+bot.hears('➕ Создать агента', (ctx) => {
+  const lang = getUserLang(ctx.from.id);
+  return safeReply(ctx,
+    `${pe('sparkles')} <b>${lang === 'ru' ? 'Создание агента' : 'Create Agent'}</b>\n\n` +
+    `${lang === 'ru' ? 'Опишите задачу своими словами — AI сам напишет код и запустит агента на нашем сервере.' : 'Describe your task in plain words — AI will write the code and run the agent on our server.'}\n\n` +
+    `<b>${lang === 'ru' ? 'Примеры задач:' : 'Task examples:'}</b>\n` +
+    `${pe('diamond')} <i>"${lang === 'ru' ? 'Проверяй баланс UQB5... каждый час' : 'Check balance UQB5... every hour'}"</i>\n` +
+    `${pe('trending')} <i>"${lang === 'ru' ? 'Следи за ценой TON, уведоми если выше $5' : 'Monitor TON price, alert if above $5'}"</i>\n` +
+    `${pe('money')} <i>"${lang === 'ru' ? 'Каждое 10-е число отправляй 100 TON на UQ...' : 'Send 100 TON to UQ... on the 10th of each month'}"</i>\n` +
+    `${pe('globe')} <i>"${lang === 'ru' ? 'Проверяй доступность сайта каждые 5 минут' : 'Check website availability every 5 minutes'}"</i>\n\n` +
+    `${pe('finger')} <b>${lang === 'ru' ? 'Напишите вашу задачу:' : 'Type your task:'}</b>`,
+    { ...getMainMenu(lang), parse_mode: 'HTML' }
+  );
+});
 bot.hears('🏪 Маркетплейс', (ctx) => showMarketplace(ctx));
 bot.hears('🔌 Плагины', (ctx) => showPlugins(ctx));
 bot.hears('⚡ Workflow', (ctx) => showWorkflows(ctx, ctx.from.id));
@@ -1123,6 +1151,29 @@ bot.hears('💎 TON Connect', (ctx) => showTonConnect(ctx));
 bot.hears('💳 Подписка', (ctx) => showSubscription(ctx));
 bot.hears('📊 Статистика', (ctx) => showStats(ctx, ctx.from.id));
 bot.hears('❓ Помощь', (ctx) => showHelp(ctx));
+// ── Английские кнопки клавиатуры ──
+bot.hears('🤖 My Agents', (ctx) => showAgentsList(ctx, ctx.from.id));
+bot.hears('➕ Create Agent', (ctx) => {
+  const lang = getUserLang(ctx.from.id);
+  return safeReply(ctx,
+    `${pe('sparkles')} <b>Create Agent</b>\n\n` +
+    `Describe your task in plain words — AI will write the code and run the agent on our server.\n\n` +
+    `<b>Task examples:</b>\n` +
+    `${pe('diamond')} <i>"Check balance UQB5... every hour"</i>\n` +
+    `${pe('trending')} <i>"Monitor TON price, alert if above $5"</i>\n` +
+    `${pe('money')} <i>"Send 100 TON to UQ... on the 10th of each month"</i>\n` +
+    `${pe('globe')} <i>"Check website availability every 5 minutes"</i>\n\n` +
+    `${pe('finger')} <b>Type your task:</b>`,
+    { ...getMainMenu(lang), parse_mode: 'HTML' }
+  );
+});
+bot.hears('🏪 Marketplace', (ctx) => showMarketplace(ctx));
+bot.hears('🔌 Plugins', (ctx) => showPlugins(ctx));
+bot.hears('💎 TON Connect', (ctx) => showTonConnect(ctx));  // same
+bot.hears('💳 Subscription', (ctx) => showSubscription(ctx));
+bot.hears('📊 Stats', (ctx) => showStats(ctx, ctx.from.id));
+bot.hears('❓ Help', (ctx) => showHelp(ctx));
+bot.hears('👤 Profile', async (ctx) => showProfile(ctx, ctx.from.id));
 // ── Выбор языка (callback при первом /start) ──
 bot.action(/^setlang_(ru|en)$/, async (ctx) => {
   await ctx.answerCbQuery();
@@ -1163,38 +1214,91 @@ async function showProfile(ctx: Context, userId: number) {
   const activeCount = agentList.filter((a: any) => a.isActive).length;
   const totalCount = agentList.length;
 
-  let statsLine = '';
+  // Подписка
+  let planName = 'Free';
+  let planIcon = '🆓';
+  let genUsed = 0;
+  let genLimit: string = '0';
   try {
-    const execStats = await getExecutionHistoryRepository().getStats(userId);
-    if (execStats) statsLine = `\n✅ *${esc(String(execStats.totalRuns))}* ${lang === 'ru' ? 'запусков всего' : 'total runs'}`;
+    const sub = await getUserSubscription(userId);
+    const plan = PLANS[sub.planId] || PLANS.free;
+    planName = plan.name;
+    planIcon = plan.icon;
+    genUsed = getGenerationsUsed(userId);
+    genLimit = plan.generationsPerMonth === -1 ? '∞' : String(plan.generationsPerMonth);
   } catch {}
 
-  const joined = profile.joined_at ? new Date(profile.joined_at).toLocaleDateString(lang === 'ru' ? 'ru-RU' : 'en-US', { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
-  const walletLine = profile.wallet_address
-    ? `\n🔗 ${lang === 'ru' ? 'Кошелёк:' : 'Wallet:'} \`${esc(profile.wallet_address.slice(0,10))}…\``
-    : `\n🔗 ${lang === 'ru' ? 'Кошелёк не привязан' : 'No wallet linked'}`;
+  // Статистика запусков
+  let totalRuns = 0;
+  let successRuns = 0;
+  try {
+    const execStats = await getExecutionHistoryRepository().getStats(userId);
+    if (execStats) {
+      totalRuns = execStats.totalRuns || 0;
+      successRuns = execStats.successRuns || totalRuns;
+    }
+  } catch {}
 
-  const text =
-    `👤 *${lang === 'ru' ? 'Профиль' : 'Profile'} — ${esc(ctx.from?.first_name || 'User')}*\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n` +
-    `💰 *${lang === 'ru' ? 'Баланс' : 'Balance'}:* ${esc(profile.balance_ton.toFixed(2))} TON\n` +
-    `📈 *${lang === 'ru' ? 'Заработано' : 'Earned'}:* ${esc(profile.total_earned.toFixed(2))} TON\n` +
-    `🤖 *${lang === 'ru' ? 'Агентов' : 'Agents'}:* ${esc(String(totalCount))} \\(${esc(String(activeCount))} ${lang === 'ru' ? 'активных' : 'active'}\\)` +
-    statsLine +
-    walletLine +
-    `\n📅 *${lang === 'ru' ? 'С нами с' : 'Member since'}:* ${esc(joined)}\n` +
-    `━━━━━━━━━━━━━━━━━━━━`;
+  // Уровень пользователя (на основе активности)
+  const xp = totalCount * 10 + totalRuns * 2 + (profile.total_earned || 0) * 5;
+  const level = Math.floor(Math.sqrt(xp / 10)) + 1;
+  const levelLabel = level >= 20 ? '🏆 Легенда' : level >= 10 ? '💎 Эксперт' : level >= 5 ? '🚀 Продвинутый' : level >= 2 ? '⚡ Новичок+' : '🌱 Новичок';
+
+  // Рейтинг (звёзды на основе активности)
+  const ratingScore = Math.min(5, Math.max(1, Math.floor((totalCount + totalRuns / 10) / 2) + 1));
+  const starsStr = '⭐'.repeat(ratingScore);
+
+  // Достижения
+  const achievements: string[] = [];
+  if (totalCount >= 1) achievements.push('🤖 Первый агент');
+  if (totalCount >= 5) achievements.push('🏭 Фабрика агентов');
+  if (totalRuns >= 10) achievements.push('⚡ Активный пользователь');
+  if (totalRuns >= 100) achievements.push('🔥 Ветеран');
+  if ((profile.total_earned || 0) > 0) achievements.push('💰 Первый заработок');
+  if (profile.wallet_address) achievements.push('🔗 Кошелёк привязан');
+
+  const joined = profile.joined_at
+    ? new Date(profile.joined_at).toLocaleDateString(lang === 'ru' ? 'ru-RU' : 'en-US', { day: 'numeric', month: 'long', year: 'numeric' })
+    : '—';
+
+  const walletLine = profile.wallet_address
+    ? `${pe('link')} <b>${lang === 'ru' ? 'Кошелёк:' : 'Wallet:'}</b> <code>${escHtml(profile.wallet_address.slice(0,10))}…</code>`
+    : `${pe('link')} <i>${lang === 'ru' ? 'Кошелёк не привязан' : 'No wallet linked'}</i>`;
+
+  let text =
+    `👤 <b>${lang === 'ru' ? 'Профиль' : 'Profile'} — ${escHtml(ctx.from?.first_name || 'User')}</b>\n` +
+    `${div()}\n` +
+    `${levelLabel} · Уровень <b>${level}</b>\n` +
+    `${starsStr}\n\n` +
+    `${pe('coin')} <b>${lang === 'ru' ? 'Баланс:' : 'Balance:'}</b> ${(profile.balance_ton || 0).toFixed(2)} TON\n` +
+    `${pe('trending')} <b>${lang === 'ru' ? 'Заработано:' : 'Earned:'}</b> ${(profile.total_earned || 0).toFixed(2)} TON\n` +
+    `${pe('robot')} <b>${lang === 'ru' ? 'Агентов:' : 'Agents:'}</b> ${totalCount} (${activeCount} ${lang === 'ru' ? 'активных' : 'active'})\n` +
+    `${pe('chart')} <b>${lang === 'ru' ? 'Запусков:' : 'Runs:'}</b> ${totalRuns}\n` +
+    `${pe('card')} <b>${lang === 'ru' ? 'Подписка:' : 'Plan:'}</b> ${planIcon} ${planName} · ${genUsed}/${genLimit} ${lang === 'ru' ? 'генераций' : 'gens'}\n` +
+    `${pe('calendar')} <b>${lang === 'ru' ? 'С нами с:' : 'Member since:'}</b> ${escHtml(joined)}\n` +
+    `${walletLine}\n` +
+    `${div()}`;
+
+  if (achievements.length > 0) {
+    text += `\n\n${pe('sparkles')} <b>${lang === 'ru' ? 'Достижения:' : 'Achievements:'}</b>\n`;
+    achievements.forEach(a => { text += `${a}\n`; });
+  }
 
   await safeReply(ctx, text, {
-    parse_mode: 'MarkdownV2',
+    parse_mode: 'HTML',
     reply_markup: {
       inline_keyboard: [
         [
-          { text: lang === 'ru' ? '💸 Вывести' : '💸 Withdraw', callback_data: 'withdraw_start' },
-          { text: lang === 'ru' ? '🔗 Привязать кошелёк' : '🔗 Link wallet', callback_data: 'profile_link_wallet' },
+          { text: `${peb('money')} ${lang === 'ru' ? 'Вывести' : 'Withdraw'}`, callback_data: 'withdraw_start' },
+          { text: `${peb('link')} ${lang === 'ru' ? 'Привязать кошелёк' : 'Link wallet'}`, callback_data: 'profile_link_wallet' },
         ],
         [
-          { text: lang === 'ru' ? '🌐 Сменить язык' : '🌐 Change language', callback_data: 'profile_change_lang' },
+          { text: `${peb('card')} ${lang === 'ru' ? 'Подписка' : 'Subscription'}`, callback_data: 'show_sub' },
+          { text: `${peb('globe')} ${lang === 'ru' ? 'Сменить язык' : 'Change language'}`, callback_data: 'profile_change_lang' },
+        ],
+        [
+          { text: `${peb('robot')} ${lang === 'ru' ? 'Мои агенты' : 'My agents'}`, callback_data: 'list_agents' },
+          { text: `${peb('store')} ${lang === 'ru' ? 'Маркетплейс' : 'Marketplace'}`, callback_data: 'marketplace' },
         ],
       ],
     },
@@ -1739,14 +1843,14 @@ bot.on('callback_query', async (ctx) => {
     await ctx.answerCbQuery();
     await safeReply(ctx,
       `✨ *Создание агента*\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `🤖 _AI напишет код и запустит агента на сервере_\n\n` +
       `*Примеры задач:*\n` +
       `💎 _"проверяй баланс UQB5\\.\\.\\. каждый час"_\n` +
       `📈 _"следи за ценой TON, уведоми если выше 5\\$"_\n` +
       `💸 _"каждый день присылай сводку по крипторынку"_\n` +
       `🌐 _"пинг сайта каждые 10 мин, уведоми при ошибке"_\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `👇 *Опишите задачу своими словами:*`,
       MAIN_MENU
     );
@@ -1837,7 +1941,7 @@ bot.on('callback_query', async (ctx) => {
       // Показываем предложенный фикс
       await ctx.telegram.editMessageText(ctx.chat!.id, statusMsg.message_id, undefined,
         `🔧 *AI нашёл исправление\\!*\n` +
-        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `${div()}\n` +
         `❌ _${esc(lastErr.error.slice(0, 80))}_\n\n` +
         `✅ *${esc(changes.slice(0, 180))}*\n\n` +
         `🚀 Применить исправление?`,
@@ -1882,7 +1986,7 @@ bot.on('callback_query', async (ctx) => {
 
     await safeReply(ctx,
       `✅ *Автопочинка завершена\\!*\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `🔧 Ошибка исправлена AI\n` +
       `⚡ _Запустите агента чтобы проверить_`,
       {
@@ -1945,7 +2049,7 @@ bot.on('callback_query', async (ctx) => {
 
     let text =
       `🔍 *Аудит — Агент \\#${esc(String(agentId))}*\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `${scoreIcon} *Безопасность: ${esc(String(score))}/100*\n` +
       `📄 ${esc(String(lines))} строк · ${hasAsync ? '✅ async' : '▶️ sync'} · ${hasTryCatch ? '✅ try/catch' : '⚠️ без try/catch'}\n`;
 
@@ -1980,7 +2084,7 @@ bot.on('callback_query', async (ctx) => {
     const agentName = agentData.data?.name || `#${agentId}`;
     await editOrReply(ctx,
       `✏️ *Изменить агента*\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${div()}\n` +
       `*${esc(agentName)}*  \\#${esc(String(agentId))}\n\n` +
       `Опишите что нужно изменить:\n` +
       `_"Измени интервал на каждые 30 минут"_\n` +
@@ -2447,7 +2551,7 @@ bot.on(message('text'), async (ctx) => {
       if (saveResult.success) {
         await safeReply(ctx,
           `✅ *Агент обновлён\\!*\n` +
-          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `${div()}\n` +
           `*${esc(agentResult.data.name)}*  \\#${esc(String(agentId))}\n` +
           `🔧 ${esc(fixResult.data.changes.slice(0, 180))}\n\n` +
           `_Запустите агента чтобы проверить изменения_`,
@@ -2676,7 +2780,7 @@ async function runAgentDirect(ctx: Context, agentId: number, userId: number) {
     if (pauseResult.success) {
       await editOrReply(ctx,
         `⏸ *Агент остановлен*\n` +
-        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `${div()}\n` +
         `*${esc(agent.name)}*  \\#${agentId}\n` +
         `_Scheduler деактивирован_`,
         {
@@ -2743,7 +2847,7 @@ async function runAgentDirect(ctx: Context, agentId: number, userId: number) {
 
       const successText =
         `✅ *Агент запущен\\!*\n` +
-        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `${div()}\n` +
         `*${esc(agent.name)}*  \\#${agentId}\n` +
         `⏰ Каждые *${esc(intervalLabel)}* · 🖥 сервер 24\\/7\n` +
         `⚡ _Первое уведомление придёт через несколько секунд_`;
@@ -2762,14 +2866,14 @@ async function runAgentDirect(ctx: Context, agentId: number, userId: number) {
     } else {
       // Однократный запуск — показываем результат
       const exec = data.executionResult;
-      let resultText = `✅ *Агент выполнен\\!*\n━━━━━━━━━━━━━━━━━━━━\n*${esc(agent.name)}*  \\#${agentId}\n`;
+      let resultText = `✅ *Агент выполнен\\!*\n${div()}\n*${esc(agent.name)}*  \\#${agentId}\n`;
 
       if (exec) {
         resultText += `⏱ Время: ${exec.executionTime}ms\n`;
         if (exec.success) {
           const rawResult = exec.result;
           if (rawResult !== undefined && rawResult !== null) {
-            resultText += `\n📊 *Результат:*\n━━━━━━━━━━━━━━━━━━━━\n`;
+            resultText += `\n📊 *Результат:*\n${div()}\n`;
             if (typeof rawResult === 'object' && !Array.isArray(rawResult)) {
               // Flatten: if value is an object, expand its entries too
               const flat: Array<[string, string]> = [];
@@ -2885,17 +2989,18 @@ async function showAgentsList(ctx: Context, userId: number) {
     const r = await getDBTools().getUserAgents(userId);
     if (!r.success || !r.data?.length) {
       await editOrReply(ctx,
-        `🤖 *Ваши агенты*\n\n` +
-        `У вас пока нет агентов\\.\n\n` +
-        `*Чтобы создать агента:*\n` +
+        `${pe('robot')} <b>Ваши агенты</b>\n\n` +
+        `У вас пока нет агентов.\n\n` +
+        `<b>Чтобы создать агента:</b>\n` +
         `• Напишите задачу своими словами\n` +
         `• Выберите готовый шаблон в Маркетплейсе\n\n` +
-        `_Примеры: "проверяй баланс кошелька каждый час", "следи за ценой TON"_`,
+        `<i>Примеры: "проверяй баланс кошелька каждый час", "следи за ценой TON"</i>`,
         {
+          parse_mode: 'HTML',
           reply_markup: {
             inline_keyboard: [
-              [{ text: '🏪 Маркетплейс шаблонов', callback_data: 'marketplace' }],
-              [{ text: '✏️ Создать с описанием', callback_data: 'create_agent_prompt' }],
+              [{ text: `${peb('store')} Маркетплейс шаблонов`, callback_data: 'marketplace' }],
+              [{ text: `${peb('plus')} Создать с описанием`, callback_data: 'create_agent_prompt' }],
             ],
           },
         }
@@ -2905,15 +3010,15 @@ async function showAgentsList(ctx: Context, userId: number) {
     const agents = r.data;
     const active = agents.filter(a => a.isActive).length;
 
-    let text = `🤖 *Ваши агенты*\n`;
-    text += `━━━━━━━━━━━━━━━━━━━━\n`;
-    text += `Всего: *${esc(String(agents.length))}*  🟢 Активных: *${esc(String(active))}*\n`;
-    text += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+    let text = `${pe('robot')} <b>Ваши агенты</b>\n`;
+    text += `${div()}\n`;
+    text += `Всего: <b>${agents.length}</b>  ${pe('green')} Активных: <b>${active}</b>\n`;
+    text += `${div()}\n\n`;
 
     agents.forEach((a) => {
-      const st = a.isActive ? '🟢' : '⏸';
-      const trIcon = a.triggerType === 'scheduled' ? '⏰' : a.triggerType === 'webhook' ? '🔗' : '▶️';
-      const name = (a.name || '').replace(/[*_`[\]]/g, '').slice(0, 28);
+      const st = a.isActive ? pe('green') : '⏸';
+      const trIcon = a.triggerType === 'scheduled' ? pe('calendar') : a.triggerType === 'webhook' ? pe('link') : pe('bolt');
+      const name = escHtml((a.name || '').slice(0, 28));
       // Интервал для scheduled
       let schedLabel = '';
       if (a.triggerType === 'scheduled') {
@@ -2924,20 +3029,20 @@ async function showAgentsList(ctx: Context, userId: number) {
       const ageMs = Date.now() - new Date(a.createdAt).getTime();
       const ageDays = Math.floor(ageMs / 86_400_000);
       const ageLabel = ageDays === 0 ? 'сегодня' : ageDays === 1 ? 'вчера' : `${ageDays}д назад`;
-      text += `${st} *#${esc(String(a.id))}* ${esc(name)}\n`;
-      text += `   ${trIcon}${esc(schedLabel)}  _${esc(ageLabel)}_\n\n`;
+      text += `${st} <b>#${a.id}</b> ${name}\n`;
+      text += `   ${trIcon}${escHtml(schedLabel)}  <i>${ageLabel}</i>\n\n`;
     });
 
     const btns = agents.slice(0, 8).map((a) => [{
-      text: `${a.isActive ? '🟢' : '⏸'} #${a.id} ${(a.name || '').slice(0, 24)}`,
+      text: `${a.isActive ? peb('green') : '⏸'} #${a.id} ${(a.name || '').slice(0, 24)}`,
       callback_data: `agent_menu:${a.id}`,
     }]);
     btns.push([
-      { text: '➕ Создать нового', callback_data: 'create_agent_prompt' },
-      { text: '🏪 Маркетплейс', callback_data: 'marketplace' },
+      { text: `${peb('plus')} Создать нового`, callback_data: 'create_agent_prompt' },
+      { text: `${peb('store')} Маркетплейс`, callback_data: 'marketplace' },
     ]);
 
-    await editOrReply(ctx, text, { reply_markup: { inline_keyboard: btns } });
+    await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: btns } });
   } catch (err) {
     console.error('showAgentsList error:', err);
     await ctx.reply('❌ Ошибка загрузки агентов. Попробуйте /start');
@@ -2949,16 +3054,21 @@ async function showAgentsList(ctx: Context, userId: number) {
 // ============================================================
 async function showAgentMenu(ctx: Context, agentId: number, userId: number) {
   try {
+    const lang = getUserLang(userId);
     const r = await getDBTools().getAgent(agentId, userId);
-    if (!r.success || !r.data) { await ctx.reply('❌ Агент не найден'); return; }
+    if (!r.success || !r.data) { await ctx.reply('❌ ' + (lang === 'ru' ? 'Агент не найден' : 'Agent not found')); return; }
     const a = r.data;
-    const name = (a.name || '').replace(/[*_`[\]]/g, '').slice(0, 40);
-    const desc = (a.description || '').replace(/[*_`[\]]/g, '').slice(0, 120);
-    const statusIcon = a.isActive ? '🟢' : '⏸';
-    const statusText = a.isActive ? 'Активен' : 'На паузе';
-    const triggerIcon = a.triggerType === 'scheduled' ? '⏰' : a.triggerType === 'webhook' ? '🔗' : '▶️';
-    const triggerText = a.triggerType === 'scheduled' ? 'По расписанию' :
-                        a.triggerType === 'webhook' ? 'Webhook' : 'Вручную';
+    const name = escHtml((a.name || '').slice(0, 40));
+    const desc = escHtml((a.description || '').slice(0, 120));
+    const statusIcon = a.isActive ? pe('green') : '⏸';
+    const statusText = a.isActive
+      ? (lang === 'ru' ? 'Активен' : 'Active')
+      : (lang === 'ru' ? 'На паузе' : 'Paused');
+    const triggerIcon = a.triggerType === 'scheduled' ? pe('calendar') : a.triggerType === 'webhook' ? pe('link') : pe('bolt');
+    const triggerText = a.triggerType === 'scheduled'
+      ? (lang === 'ru' ? 'По расписанию' : 'Scheduled')
+      : a.triggerType === 'webhook' ? 'Webhook'
+      : (lang === 'ru' ? 'Вручную' : 'Manual');
 
     const lastErr = agentLastErrors.get(agentId);
     const hasError = !!lastErr;
@@ -2968,53 +3078,57 @@ async function showAgentMenu(ctx: Context, agentId: number, userId: number) {
     const intervalMs = triggerCfg?.intervalMs ? Number(triggerCfg.intervalMs) : 0;
     let intervalLabel = '';
     if (a.triggerType === 'scheduled' && intervalMs > 0) {
-      if (intervalMs < 60000) intervalLabel = ' · каждую минуту';
-      else if (intervalMs < 3600000) intervalLabel = ` · каждые ${Math.round(intervalMs / 60000)} мин`;
-      else if (intervalMs < 86400000) intervalLabel = ' · каждый час';
-      else intervalLabel = ` · раз в ${Math.round(intervalMs / 86400000)} д`;
+      if (intervalMs < 60000) intervalLabel = lang === 'ru' ? ' · каждую минуту' : ' · every minute';
+      else if (intervalMs < 3600000) intervalLabel = lang === 'ru' ? ` · каждые ${Math.round(intervalMs / 60000)} мин` : ` · every ${Math.round(intervalMs / 60000)} min`;
+      else if (intervalMs < 86400000) intervalLabel = lang === 'ru' ? ' · каждый час' : ' · every hour';
+      else intervalLabel = lang === 'ru' ? ` · раз в ${Math.round(intervalMs / 86400000)} д` : ` · every ${Math.round(intervalMs / 86400000)} d`;
     }
 
     // Дата создания
     const createdAt = a.createdAt ? new Date(a.createdAt) : null;
     const daysAgo = createdAt ? Math.floor((Date.now() - createdAt.getTime()) / 86400000) : -1;
-    const dateLabel = daysAgo < 0 ? '' : daysAgo === 0 ? 'сегодня' : daysAgo === 1 ? 'вчера' : `${daysAgo}д назад`;
+    const dateLabel = daysAgo < 0 ? '' : daysAgo === 0
+      ? (lang === 'ru' ? 'сегодня' : 'today')
+      : daysAgo === 1
+      ? (lang === 'ru' ? 'вчера' : 'yesterday')
+      : lang === 'ru' ? `${daysAgo}д назад` : `${daysAgo}d ago`;
 
     const text =
-      `${statusIcon} *${esc(name)}*  \\#${esc(String(a.id))}\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
-      `Статус: *${esc(statusText)}*\n` +
-      `${triggerIcon} ${esc(triggerText + intervalLabel)}\n` +
-      (dateLabel ? `📅 Создан: _${esc(dateLabel)}_\n` : '') +
-      (hasError ? `\n⚠️ *Последняя ошибка:*\n\`${esc(lastErr!.error.slice(0, 120))}\`` : '') +
-      (desc ? `\n_${esc(desc)}_` : '');
+      `${statusIcon} <b>${name}</b>  #${a.id}\n` +
+      `${div()}\n` +
+      `${lang === 'ru' ? 'Статус' : 'Status'}: <b>${statusText}</b>\n` +
+      `${triggerIcon} ${escHtml(triggerText + intervalLabel)}\n` +
+      (dateLabel ? `${pe('calendar')} ${lang === 'ru' ? 'Создан' : 'Created'}: <i>${dateLabel}</i>\n` : '') +
+      (hasError ? `\n⚠️ <b>${lang === 'ru' ? 'Последняя ошибка:' : 'Last error:'}</b>\n<code>${escHtml(lastErr!.error.slice(0, 120))}</code>` : '') +
+      (desc ? `\n<i>${desc}</i>` : '');
 
     const keyboard: any[][] = [
       [
-        { text: a.isActive ? '⏸ Остановить' : '🚀 Запустить', callback_data: `run_agent:${agentId}` },
-        { text: '📋 Логи', callback_data: `show_logs:${agentId}` },
+        { text: a.isActive ? `⏸ ${lang === 'ru' ? 'Остановить' : 'Stop'}` : `${peb('rocket')} ${lang === 'ru' ? 'Запустить' : 'Start'}`, callback_data: `run_agent:${agentId}` },
+        { text: `${peb('clipboard')} ${lang === 'ru' ? 'Логи' : 'Logs'}`, callback_data: `show_logs:${agentId}` },
       ],
     ];
 
     if (hasError) {
-      keyboard.push([{ text: '🔧 AI Автопочинка', callback_data: `auto_repair:${agentId}` }]);
+      keyboard.push([{ text: `${peb('wrench')} AI ${lang === 'ru' ? 'Автопочинка' : 'Auto-repair'}`, callback_data: `auto_repair:${agentId}` }]);
     }
 
     keyboard.push([
-      { text: '👁 Код', callback_data: `show_code:${agentId}` },
-      { text: '🔍 Аудит', callback_data: `audit_agent:${agentId}` },
+      { text: `👁 ${lang === 'ru' ? 'Код' : 'Code'}`, callback_data: `show_code:${agentId}` },
+      { text: `🔍 ${lang === 'ru' ? 'Аудит' : 'Audit'}`, callback_data: `audit_agent:${agentId}` },
     ]);
     keyboard.push([
-      { text: '✏️ Изменить', callback_data: `edit_agent:${agentId}` },
-      { text: '🏷 Переименовать', callback_data: `rename_agent:${agentId}` },
+      { text: `✏️ ${lang === 'ru' ? 'Изменить' : 'Edit'}`, callback_data: `edit_agent:${agentId}` },
+      { text: `🏷 ${lang === 'ru' ? 'Переименовать' : 'Rename'}`, callback_data: `rename_agent:${agentId}` },
     ]);
     keyboard.push([
-      { text: '🗑 Удалить', callback_data: `delete_agent:${agentId}` },
-      { text: '◀️ Все агенты', callback_data: 'list_agents' },
+      { text: `🗑 ${lang === 'ru' ? 'Удалить' : 'Delete'}`, callback_data: `delete_agent:${agentId}` },
+      { text: `${peb('back')} ${lang === 'ru' ? 'Все агенты' : 'All agents'}`, callback_data: 'list_agents' },
     ]);
 
-    await editOrReply(ctx, text, { reply_markup: { inline_keyboard: keyboard } });
+    await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } });
   } catch (err) {
-    await ctx.reply('❌ Ошибка загрузки агента');
+    await ctx.reply('❌ ' + 'Error loading agent');
   }
 }
 
@@ -3023,6 +3137,7 @@ async function showAgentMenu(ctx: Context, agentId: number, userId: number) {
 // ============================================================
 async function showTonConnect(ctx: Context) {
   const userId = ctx.from!.id;
+  const lang = getUserLang(userId);
   const tonConn = getTonConnectManager();
 
   if (tonConn.isConnected(userId)) {
@@ -3030,19 +3145,20 @@ async function showTonConnect(ctx: Context) {
     const wallet = tonConn.getWallet(userId)!;
     const bal = await tonConn.getBalance(userId);
     await safeReply(ctx,
-      `💎 *TON Connect*\n\n` +
-      `✅ Кошелёк подключён\n` +
-      `👛 ${esc(wallet.walletName)}\n` +
-      `📋 Адрес: \`${esc(wallet.friendlyAddress)}\`\n` +
-      `💰 Баланс: *${esc(bal.ton)}* TON\n\n` +
-      `Что хотите сделать?`,
+      `${pe('diamond')} <b>TON Connect</b>\n\n` +
+      `${pe('check')} ${lang === 'ru' ? 'Кошелёк подключён' : 'Wallet connected'}\n` +
+      `${pe('wallet')} ${escHtml(wallet.walletName)}\n` +
+      `${pe('link')} ${lang === 'ru' ? 'Адрес' : 'Address'}: <code>${escHtml(wallet.friendlyAddress)}</code>\n` +
+      `${pe('coin')} ${lang === 'ru' ? 'Баланс' : 'Balance'}: <b>${escHtml(bal.ton)}</b> TON\n\n` +
+      `${lang === 'ru' ? 'Что хотите сделать?' : 'What would you like to do?'}`,
       {
+        parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
-            [{ text: '🔄 Обновить баланс', callback_data: 'ton_refresh' }],
-            [{ text: '💸 Отправить TON', callback_data: 'ton_send' }],
-            [{ text: '📋 История транзакций', callback_data: 'ton_history' }],
-            [{ text: '🔌 Отключить кошелёк', callback_data: 'ton_disconnect' }],
+            [{ text: `${peb('refresh')} ${lang === 'ru' ? 'Обновить баланс' : 'Refresh balance'}`, callback_data: 'ton_refresh' }],
+            [{ text: `${peb('money')} ${lang === 'ru' ? 'Отправить TON' : 'Send TON'}`, callback_data: 'ton_send' }],
+            [{ text: `${peb('clipboard')} ${lang === 'ru' ? 'История транзакций' : 'Transaction history'}`, callback_data: 'ton_history' }],
+            [{ text: `${peb('plugin')} ${lang === 'ru' ? 'Отключить кошелёк' : 'Disconnect wallet'}`, callback_data: 'ton_disconnect' }],
           ],
         },
       }
@@ -3121,12 +3237,13 @@ async function showTonConnect(ctx: Context) {
 // Маркетплейс
 // ============================================================
 async function showMarketplace(ctx: Context) {
+  const lang = getUserLang(ctx.from?.id || 0);
   const CATS = [
-    { id: 'ton',        icon: '💎', name: 'TON блокчейн', hint: 'кошельки, переводы, DeFi' },
-    { id: 'finance',    icon: '💰', name: 'Финансы',      hint: 'цены, DEX, алерты' },
-    { id: 'monitoring', icon: '📊', name: 'Мониторинг',   hint: 'uptime, API, уведомления' },
-    { id: 'utility',    icon: '🔧', name: 'Утилиты',      hint: 'парсинг, расписания, задачи' },
-    { id: 'social',     icon: '📣', name: 'Социальные',   hint: 'новости, посты, каналы' },
+    { id: 'ton',        icon: peb('diamond'),   name: lang === 'ru' ? 'TON блокчейн' : 'TON Blockchain', hint: lang === 'ru' ? 'кошельки, переводы, DeFi' : 'wallets, transfers, DeFi' },
+    { id: 'finance',    icon: peb('coin'),       name: lang === 'ru' ? 'Финансы' : 'Finance',             hint: lang === 'ru' ? 'цены, DEX, алерты' : 'prices, DEX, alerts' },
+    { id: 'monitoring', icon: peb('chart'),      name: lang === 'ru' ? 'Мониторинг' : 'Monitoring',       hint: lang === 'ru' ? 'uptime, API, уведомления' : 'uptime, API, notifications' },
+    { id: 'utility',    icon: peb('wrench'),     name: lang === 'ru' ? 'Утилиты' : 'Utilities',           hint: lang === 'ru' ? 'парсинг, расписания, задачи' : 'parsing, schedules, tasks' },
+    { id: 'social',     icon: peb('megaphone'),  name: lang === 'ru' ? 'Социальные' : 'Social',           hint: lang === 'ru' ? 'новости, посты, каналы' : 'news, posts, channels' },
   ] as const;
 
   // Загружаем пользовательские листинги из БД
@@ -3136,89 +3253,123 @@ async function showMarketplace(ctx: Context) {
     userListingsCount = listings.length;
   } catch { /* репозиторий может ещё не быть готов */ }
 
-  let text = `🏪 *Маркетплейс агентов*\n`;
-  text += `_Готовые агенты — установка в 1 клик_\n\n`;
-  text += `━━━━━━━━━━━━━━━━━━━━\n`;
-  text += `📦 Шаблонов: *${esc(String(allAgentTemplates.length))}*`;
-  if (userListingsCount > 0) text += `  👥 Сообщество: *${esc(String(userListingsCount))}*`;
-  text += `\n━━━━━━━━━━━━━━━━━━━━\n\n`;
+  const totalTemplates = allAgentTemplates.length;
+
+  // Считаем топ-3 шаблона по популярности (по количеству тегов как прокси)
+  const topTemplates = [...allAgentTemplates]
+    .sort((a, b) => b.tags.length - a.tags.length)
+    .slice(0, 3);
+
+  let text =
+    `${pe('store')} <b>${lang === 'ru' ? 'Маркетплейс агентов' : 'Agent Marketplace'}</b>\n` +
+    `<i>${lang === 'ru' ? 'Готовые агенты — установка в 1 клик' : 'Ready agents — install in 1 click'}</i>\n\n` +
+    `${div()}\n` +
+    `${pe('clipboard')} ${lang === 'ru' ? 'Шаблонов' : 'Templates'}: <b>${totalTemplates}</b>`;
+  if (userListingsCount > 0) text += `  👥 ${lang === 'ru' ? 'Сообщество' : 'Community'}: <b>${userListingsCount}</b>`;
+  text += `\n${div()}\n\n`;
 
   CATS.forEach(c => {
     const count = allAgentTemplates.filter(t => t.category === c.id).length;
-    if (count > 0) text += `${c.icon} *${esc(c.name)}* — ${esc(String(count))} · _${esc(c.hint)}_\n`;
+    if (count > 0) text += `${c.icon} <b>${escHtml(c.name)}</b> — ${count} · <i>${escHtml(c.hint)}</i>\n`;
   });
+
+  if (topTemplates.length > 0) {
+    text += `\n${pe('trending')} <b>${lang === 'ru' ? 'Популярные' : 'Popular'}:</b>\n`;
+    topTemplates.forEach(t => { text += `• ${t.icon} ${escHtml(t.name)}\n`; });
+  }
 
   const btns = CATS.filter(c => allAgentTemplates.filter(t => t.category === c.id).length > 0)
     .map(c => {
       const count = allAgentTemplates.filter(t => t.category === c.id).length;
       return [{ text: `${c.icon} ${c.name} (${count})`, callback_data: `marketplace_cat:${c.id}` }];
     });
-  btns.push([{ text: '📋 Все шаблоны', callback_data: 'marketplace_all' }]);
+  btns.push([{ text: `${peb('clipboard')} ${lang === 'ru' ? 'Все шаблоны' : 'All templates'}`, callback_data: 'marketplace_all' }]);
   if (userListingsCount > 0) {
-    btns.push([{ text: '👥 От сообщества', callback_data: 'mkt_community' }]);
+    btns.push([{ text: `👥 ${lang === 'ru' ? 'От сообщества' : 'Community'}`, callback_data: 'mkt_community' }]);
   }
-  btns.push([{ text: '📤 Опубликовать своего агента', callback_data: 'mkt_publish_help' }]);
+  btns.push([{ text: `${peb('outbox')} ${lang === 'ru' ? 'Опубликовать своего агента' : 'Publish your agent'}`, callback_data: 'mkt_publish_help' }]);
 
-  await editOrReply(ctx, text, { reply_markup: { inline_keyboard: btns } });
+  await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: btns } });
 }
 
 async function showMarketplaceAll(ctx: Context) {
+  const lang = getUserLang(ctx.from?.id || 0);
   const templates = allAgentTemplates.slice(0, 20);
-  let text = `📋 *Все агенты (${allAgentTemplates.length}):*\n\n`;
-  templates.forEach(t => { text += `${t.icon} *${esc(t.name)}* — ${esc(t.description.slice(0, 50))}\n`; });
+  let text = `${pe('clipboard')} <b>${lang === 'ru' ? 'Все агенты' : 'All agents'} (${allAgentTemplates.length}):</b>\n\n`;
+  templates.forEach(t => { text += `${t.icon} <b>${escHtml(t.name)}</b> — ${escHtml(t.description.slice(0, 50))}\n`; });
 
   const btns = templates.map(t => [{ text: `${t.icon} ${t.name}`, callback_data: `template:${t.id}` }]);
-  btns.push([{ text: '◀️ Назад', callback_data: 'marketplace' }]);
-  await editOrReply(ctx, text, { reply_markup: { inline_keyboard: btns } });
+  btns.push([{ text: `${peb('back')} ${lang === 'ru' ? 'Назад' : 'Back'}`, callback_data: 'marketplace' }]);
+  await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: btns } });
 }
 
 async function showMarketplaceCategory(ctx: Context, category: AgentTemplate['category']) {
+  const lang = getUserLang(ctx.from?.id || 0);
   const templates = allAgentTemplates.filter(t => t.category === category);
-  if (!templates.length) { await ctx.reply('❌ Агенты не найдены', { reply_markup: { inline_keyboard: [[{ text: '◀️ Назад', callback_data: 'marketplace' }]] } }); return; }
+  if (!templates.length) { await ctx.reply('❌ ' + (lang === 'ru' ? 'Агенты не найдены' : 'Agents not found'), { reply_markup: { inline_keyboard: [[{ text: `${peb('back')} ${lang === 'ru' ? 'Назад' : 'Back'}`, callback_data: 'marketplace' }]] } }); return; }
 
-  const catNames: Record<string, string> = {
-    ton: '💎 TON блокчейн', finance: '💰 Финансы', monitoring: '📊 Мониторинг',
-    utility: '🔧 Утилиты', social: '📣 Социальные',
+  const catMeta: Record<string, { icon: string; name: string }> = {
+    ton:        { icon: peb('diamond'),  name: lang === 'ru' ? 'TON блокчейн' : 'TON Blockchain' },
+    finance:    { icon: peb('coin'),     name: lang === 'ru' ? 'Финансы' : 'Finance' },
+    monitoring: { icon: peb('chart'),    name: 'Мониторинг' },
+    utility:    { icon: peb('wrench'),   name: lang === 'ru' ? 'Утилиты' : 'Utilities' },
+    social:     { icon: peb('megaphone'),name: lang === 'ru' ? 'Социальные' : 'Social' },
   };
-  let text = `${catNames[category] || category} \\— *${esc(templates.length)} агентов*\n\nВыберите агента:\n\n`;
-  templates.forEach(t => { text += `${t.icon} *${esc(t.name)}*\n${esc(t.description.slice(0, 60))}\n\n`; });
+  const meta = catMeta[category] || { icon: '📦', name: category };
+  let text = `${meta.icon} <b>${escHtml(meta.name)}</b> — <b>${templates.length} ${lang === 'ru' ? 'агентов' : 'agents'}</b>\n\n${lang === 'ru' ? 'Выберите агента' : 'Choose an agent'}:\n\n`;
+  templates.forEach(t => {
+    text += `${t.icon} <b>${escHtml(t.name)}</b>\n<i>${escHtml(t.description.slice(0, 70))}</i>\n\n`;
+  });
 
   const btns = templates.map(t => [{ text: `${t.icon} ${t.name}`, callback_data: `template:${t.id}` }]);
-  btns.push([{ text: '◀️ Маркетплейс', callback_data: 'marketplace' }]);
-  await editOrReply(ctx, text, { reply_markup: { inline_keyboard: btns } });
+  btns.push([{ text: `${peb('back')} ${lang === 'ru' ? 'Маркетплейс' : 'Marketplace'}`, callback_data: 'marketplace' }]);
+  await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: btns } });
 }
 
 async function showTemplateDetails(ctx: Context, templateId: string) {
+  const lang = getUserLang(ctx.from?.id || 0);
   const t = allAgentTemplates.find(x => x.id === templateId);
-  if (!t) { await ctx.reply('❌ Шаблон не найден'); return; }
+  if (!t) { await ctx.reply('❌ ' + (lang === 'ru' ? 'Шаблон не найден' : 'Template not found')); return; }
 
-  const triggerLine = t.triggerType === 'scheduled' ? '⏰ По расписанию' : t.triggerType === 'webhook' ? '🔗 Webhook' : '▶️ Вручную';
+  const triggerIcon = t.triggerType === 'scheduled' ? peb('calendar') : t.triggerType === 'webhook' ? peb('link') : peb('bolt');
+  const triggerLabel = t.triggerType === 'scheduled'
+    ? (lang === 'ru' ? 'По расписанию' : 'Scheduled')
+    : t.triggerType === 'webhook' ? 'Webhook'
+    : (lang === 'ru' ? 'Вручную' : 'Manual');
   let intervalLine = '';
   if (t.triggerType === 'scheduled' && t.triggerConfig.intervalMs) {
     const ms = t.triggerConfig.intervalMs;
-    const label = ms >= 86400000 ? `${ms / 86400000} дн` : ms >= 3600000 ? `${ms / 3600000} ч` : `${ms / 60000} мин`;
-    intervalLine = ` · каждые ${label}`;
+    const label = ms >= 86400000
+      ? `${ms / 86400000} ${lang === 'ru' ? 'дн' : 'd'}`
+      : ms >= 3600000 ? `${ms / 3600000} ${lang === 'ru' ? 'ч' : 'h'}`
+      : `${ms / 60000} ${lang === 'ru' ? 'мин' : 'min'}`;
+    intervalLine = ` · ${lang === 'ru' ? 'каждые' : 'every'} ${label}`;
   }
 
+  // Рейтинг шаблона (на основе тегов как прокси популярности)
+  const stars = Math.min(5, Math.max(3, t.tags.length));
+  const starsStr = '⭐'.repeat(stars);
+
   let text =
-    `${t.icon} *${esc(t.name)}*\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n` +
-    `_${esc(t.description)}_\n\n` +
-    `${triggerLine}${esc(intervalLine)}\n` +
-    `🏷 ${t.tags.slice(0, 5).map(x => `\`${esc(x)}\``).join(' ')}\n`;
+    `${t.icon} <b>${escHtml(t.name)}</b>\n` +
+    `${div()}\n` +
+    `<i>${escHtml(t.description)}</i>\n\n` +
+    `${triggerIcon} ${escHtml(triggerLabel)}${escHtml(intervalLine)}\n` +
+    `${starsStr} · 🏷 ${t.tags.slice(0, 5).map(x => `<code>${escHtml(x)}</code>`).join(' ')}\n`;
 
   if (t.placeholders.length) {
-    text += `\n⚙️ *Настраиваемые параметры:*\n`;
-    t.placeholders.forEach(p => { text += `• \`${esc(p.name)}\`${p.required ? ' ✳️' : ''} — ${esc(p.description)}\n`; });
+    text += `\n${pe('wrench')} <b>${lang === 'ru' ? 'Настраиваемые параметры' : 'Configurable parameters'}:</b>\n`;
+    t.placeholders.forEach(p => { text += `• <code>${escHtml(p.name)}</code>${p.required ? ' ✳️' : ''} — ${escHtml(p.description)}\n`; });
   } else {
-    text += `\n✅ _Готов к запуску — параметры не нужны_\n`;
+    text += `\n${pe('check')} <i>${lang === 'ru' ? 'Готов к запуску — параметры не нужны' : 'Ready to run — no parameters needed'}</i>\n`;
   }
 
   await editOrReply(ctx, text, {
+    parse_mode: 'HTML',
     reply_markup: {
       inline_keyboard: [
-        [{ text: `🚀 Создать и запустить`, callback_data: `create_from_template:${t.id}` }],
-        [{ text: '◀️ Назад', callback_data: `marketplace_cat:${t.category}` }, { text: '🏪 Маркетплейс', callback_data: 'marketplace' }],
+        [{ text: `${peb('rocket')} ${lang === 'ru' ? 'Создать и запустить' : 'Create & run'}`, callback_data: `create_from_template:${t.id}` }],
+        [{ text: `${peb('back')} ${lang === 'ru' ? 'Назад' : 'Back'}`, callback_data: `marketplace_cat:${t.category}` }, { text: `${peb('store')} ${lang === 'ru' ? 'Маркетплейс' : 'Marketplace'}`, callback_data: 'marketplace' }],
       ],
     },
   });
@@ -3280,36 +3431,36 @@ async function doCreateAgentFromTemplate(ctx: Context, templateId: string, userI
 
   const lang = getUserLang(userId);
   let text =
-    `🎉 *${lang === 'ru' ? 'Агент создан\\!' : 'Agent created\\!'}*\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n` +
-    `${t.icon} *${esc(t.name)}*  \\#${esc(String(agent.id))}\n` +
-    `🖥 _На сервере · работает 24/7_\n`;
+    `${pe('sparkles')} <b>${lang === 'ru' ? 'Агент создан!' : 'Agent created!'}</b>\n` +
+    `${div()}\n` +
+    `${t.icon} <b>${escHtml(t.name)}</b>  #${agent.id}\n` +
+    `${pe('cloud')} <i>На сервере · работает 24/7</i>\n`;
 
   if (Object.keys(vars).length > 0) {
-    text += `\n✅ *${lang === 'ru' ? 'Переменные:' : 'Variables:'}*\n`;
-    Object.entries(vars).forEach(([k, v]) => { text += `\`${esc(k)}\` \\= \`${esc(v.slice(0, 40))}\`\n`; });
+    text += `\n${pe('check')} <b>${lang === 'ru' ? 'Переменные:' : 'Variables:'}</b>\n`;
+    Object.entries(vars).forEach(([k, v]) => { text += `<code>${escHtml(k)}</code> = <code>${escHtml(v.slice(0, 40))}</code>\n`; });
   }
 
   const unset = t.placeholders.filter(p => !vars[p.name] && p.required);
   if (unset.length) {
-    text += `\n⚠️ *${lang === 'ru' ? 'Нужно настроить:' : 'Setup required:'}*\n`;
-    unset.forEach(p => { text += `• \`${esc(p.name)}\` — ${esc(p.description)}\n`; });
+    text += `\n⚠️ <b>${lang === 'ru' ? 'Нужно настроить:' : 'Setup required:'}</b>\n`;
+    unset.forEach(p => { text += `• <code>${escHtml(p.name)}</code> — ${escHtml(p.description)}\n`; });
   }
 
   const readyToRun = !unset.length;
 
   if (readyToRun) {
-    text += `\n🟢 _${lang === 'ru' ? 'Автозапуск — первый результат через несколько секунд\\!' : 'Auto\\-starting — first result in seconds\\!'}_ ⚡`;
+    text += `\n${pe('green')} <i>${lang === 'ru' ? 'Автозапуск — первый результат через несколько секунд!' : 'Auto-starting — first result in seconds!'}</i> ${pe('bolt')}`;
   }
 
   await safeReply(ctx, text, {
-    parse_mode: 'MarkdownV2',
+    parse_mode: 'HTML',
     reply_markup: {
       inline_keyboard: [
         readyToRun
-          ? [{ text: '⏸ Остановить', callback_data: `stop_agent:${agent.id}` }, { text: '👁 Код', callback_data: `show_code:${agent.id}` }]
-          : [{ text: '🚀 Запустить', callback_data: `run_agent:${agent.id}` }, { text: '👁 Код', callback_data: `show_code:${agent.id}` }],
-        [{ text: '📋 Мои агенты', callback_data: 'list_agents' }],
+          ? [{ text: `⏸ Остановить`, callback_data: `stop_agent:${agent.id}` }, { text: `👁 Код`, callback_data: `show_code:${agent.id}` }]
+          : [{ text: `${peb('rocket')} Запустить`, callback_data: `run_agent:${agent.id}` }, { text: `👁 Код`, callback_data: `show_code:${agent.id}` }],
+        [{ text: `${peb('clipboard')} Мои агенты`, callback_data: 'list_agents' }],
       ],
     },
   });
@@ -3367,26 +3518,33 @@ async function showCommunityListings(ctx: Context) {
     const listings = await getMarketplaceRepository().getListings();
     if (!listings.length) {
       return editOrReply(ctx,
-        '👥 *Листинги от сообщества*\n\nПока пусто\\. Будьте первым\\!',
-        { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: [[{ text: '📤 Опубликовать агента', callback_data: 'mkt_publish_help' }], [{ text: '◀️ Маркетплейс', callback_data: 'marketplace' }]] } }
+        `${pe('store')} <b>Маркетплейс сообщества</b>\n\nПока пусто. Будьте первым!`,
+        { parse_mode: 'HTML', reply_markup: { inline_keyboard: [
+          [{ text: `${peb('outbox')} Опубликовать агента`, callback_data: 'mkt_publish_help' }],
+          [{ text: `${peb('back')} Маркетплейс`, callback_data: 'marketplace' }],
+        ] } }
       );
     }
 
-    let text = `👥 *Маркетплейс сообщества*\n━━━━━━━━━━━━━━━━━━━━\n_${esc(String(listings.length))} агентов от пользователей_\n\n`;
+    let text = `${pe('store')} <b>Маркетплейс сообщества</b>\n${div()}\n<i>${listings.length} агентов от пользователей</i>\n\n`;
     listings.slice(0, 10).forEach((l: any) => {
-      const price = l.isFree ? '🆓' : `💎 ${(l.price / 1e9).toFixed(1)}`;
-      const sales = l.totalSales > 0 ? ` · ⬇️${esc(String(l.totalSales))}` : '';
-      text += `${price} *${esc(l.name.slice(0, 35))}*${sales}\n`;
+      const priceIcon = l.isFree ? '🆓' : `${peb('diamond')}`;
+      const priceStr = l.isFree ? 'Бесплатно' : `${(l.price / 1e9).toFixed(1)} TON`;
+      const sales = l.totalSales > 0 ? ` · ${pe('trending')} ${l.totalSales} уст.` : '';
+      const stars = Math.min(5, Math.max(3, Math.floor(l.totalSales / 2) + 3));
+      const starsStr = '⭐'.repeat(stars);
+      text += `${priceIcon} <b>${escHtml(l.name.slice(0, 35))}</b>${sales}\n`;
+      text += `${starsStr} · ${priceStr}\n\n`;
     });
 
     const btns = listings.slice(0, 8).map((l: any) => [
-      { text: `${l.isFree ? '🆓' : '💰'} ${l.name.slice(0, 30)}`, callback_data: `mkt_view:${l.id}` }
+      { text: `${l.isFree ? '🆓' : peb('diamond')} ${l.name.slice(0, 30)}`, callback_data: `mkt_view:${l.id}` }
     ]);
-    btns.push([{ text: '◀️ Маркетплейс', callback_data: 'marketplace' }]);
+    btns.push([{ text: `${peb('back')} Маркетплейс`, callback_data: 'marketplace' }]);
 
-    await editOrReply(ctx, text, { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: btns } });
+    await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: btns } });
   } catch (e: any) {
-    await editOrReply(ctx, `❌ Ошибка: ${esc(e.message)}`, { parse_mode: 'MarkdownV2' });
+    await editOrReply(ctx, `❌ Ошибка: ${escHtml(e.message)}`, { parse_mode: 'HTML' });
   }
 }
 
@@ -3398,27 +3556,31 @@ async function showListingDetail(ctx: Context, listingId: number, userId: number
     const alreadyBought = await getMarketplaceRepository().hasPurchased(listingId, userId);
     const isOwner = listing.sellerId === userId;
 
-    const price = listing.isFree ? '🆓 Бесплатно' : `💎 ${(listing.price / 1e9).toFixed(2)} TON`;
+    const priceStr = listing.isFree ? '🆓 Бесплатно' : `${peb('diamond')} ${(listing.price / 1e9).toFixed(2)} TON`;
+    const stars = Math.min(5, Math.max(3, Math.floor(listing.totalSales / 2) + 3));
+    const starsStr = '⭐'.repeat(stars);
+
     let text =
-      `🤖 *${esc(listing.name)}*\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
-      `_${esc(listing.description || 'Описание отсутствует')}_\n\n` +
-      `${price}  ·  📊 ${esc(String(listing.totalSales))} продаж\n`;
-    if (isOwner) text += `\n_✏️ Вы — автор этого листинга_`;
-    if (alreadyBought) text += `\n_✅ Уже приобретено_`;
+      `${pe('robot')} <b>${escHtml(listing.name)}</b>\n` +
+      `${div()}\n` +
+      `<i>${escHtml(listing.description || 'Описание отсутствует')}</i>\n\n` +
+      `${priceStr}  ·  ${pe('chart')} ${listing.totalSales} продаж\n` +
+      `${starsStr}\n`;
+    if (isOwner) text += `\n<i>✏️ Вы — автор этого листинга</i>`;
+    if (alreadyBought) text += `\n${pe('check')} <i>Уже приобретено</i>`;
 
     const btns: any[] = [];
     if (!isOwner && !alreadyBought) {
-      btns.push([{ text: listing.isFree ? '🆓 Получить бесплатно' : `💰 Купить ${(listing.price / 1e9).toFixed(2)} TON`, callback_data: `mkt_buy:${listingId}` }]);
+      btns.push([{ text: listing.isFree ? `🆓 Получить бесплатно` : `${peb('coin')} Купить ${(listing.price / 1e9).toFixed(2)} TON`, callback_data: `mkt_buy:${listingId}` }]);
     }
     if (alreadyBought) {
-      btns.push([{ text: '▶️ Запустить', callback_data: `run_agent:${listing.agentId}` }]);
+      btns.push([{ text: `${peb('rocket')} Запустить`, callback_data: `run_agent:${listing.agentId}` }]);
     }
-    btns.push([{ text: '◀️ Назад', callback_data: 'mkt_community' }, { text: '🏪 Маркетплейс', callback_data: 'marketplace' }]);
+    btns.push([{ text: `${peb('back')} Назад`, callback_data: 'mkt_community' }, { text: `${peb('store')} Маркетплейс`, callback_data: 'marketplace' }]);
 
-    await editOrReply(ctx, text, { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: btns } });
+    await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: btns } });
   } catch (e: any) {
-    await editOrReply(ctx, `❌ Ошибка: ${esc(e.message)}`, { parse_mode: 'MarkdownV2' });
+    await editOrReply(ctx, `❌ Ошибка: ${escHtml(e.message)}`, { parse_mode: 'HTML' });
   }
 }
 
@@ -3493,17 +3655,17 @@ async function buyMarketplaceListing(ctx: Context, listingId: number, userId: nu
     });
 
     await editOrReply(ctx,
-      `✅ *Агент получен\\!*\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
-      `🤖 *${esc(listing.name)}*  \\#${esc(String(newAgent.id))}\n` +
+      `${pe('check')} <b>Агент получен!</b>\n` +
+      `${div()}\n` +
+      `${pe('robot')} <b>${escHtml(listing.name)}</b>  #${newAgent.id}\n` +
       `🆓 Бесплатно из маркетплейса\n\n` +
-      `_Запустите агента — всё готово к работе_`,
+      `<i>Запустите агента — всё готово к работе</i>`,
       {
-        parse_mode: 'MarkdownV2',
+        parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
-            [{ text: '🚀 Запустить', callback_data: `run_agent:${newAgent.id}` }, { text: '👁 Просмотр', callback_data: `agent_menu:${newAgent.id}` }],
-            [{ text: '🤖 Мои агенты', callback_data: 'list_agents' }],
+            [{ text: `${peb('rocket')} Запустить`, callback_data: `run_agent:${newAgent.id}` }, { text: `👁 Просмотр`, callback_data: `agent_menu:${newAgent.id}` }],
+            [{ text: `${peb('robot')} Мои агенты`, callback_data: 'list_agents' }],
           ],
         },
       }
@@ -3566,17 +3728,17 @@ async function doPublishAgent(ctx: Context, userId: number, agentId: number, pri
 
     const priceStr = priceNano === 0 ? 'Бесплатно' : (priceNano / 1e9).toFixed(2) + ' TON';
     await safeReply(ctx,
-      `✅ *Агент опубликован\\!*\n\n` +
-      `📋 Листинг \\#${esc(String(listing.id))}\n` +
-      `🤖 *${esc(name)}*\n` +
-      `💰 Цена: ${esc(priceStr)}\n\n` +
-      `Другие пользователи найдут его в маркетплейсе\\.\nОни смогут *запускать* агента, но *не видеть код*`,
+      `${pe('check')} <b>Агент опубликован!</b>\n\n` +
+      `${pe('clipboard')} Листинг #${listing.id}\n` +
+      `${pe('robot')} <b>${escHtml(name)}</b>\n` +
+      `${pe('coin')} Цена: ${escHtml(priceStr)}\n\n` +
+      `Другие пользователи найдут его в маркетплейсе.\nОни смогут <b>запускать</b> агента, но <b>не видеть код</b>`,
       {
-        parse_mode: 'MarkdownV2',
+        parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
-            [{ text: '🏪 Маркетплейс', callback_data: 'marketplace' }],
-            [{ text: '📦 Мои листинги', callback_data: 'mkt_mylistings' }],
+            [{ text: `${peb('store')} Маркетплейс`, callback_data: 'marketplace' }],
+            [{ text: `${peb('outbox')} Мои листинги`, callback_data: 'mkt_mylistings' }],
           ],
         },
       }
@@ -3590,28 +3752,29 @@ async function doPublishAgent(ctx: Context, userId: number, agentId: number, pri
 // Плагины
 // ============================================================
 async function showPlugins(ctx: Context) {
+  const lang = getUserLang(ctx.from?.id || 0);
   const mgr = getPluginManager();
   const plugins = mgr.getAllPlugins();
   const stats = mgr.getStats();
 
-  let text = `🔌 *Маркетплейс плагинов*\n\n`;
-  text += `Всего: *${esc(stats.total)}* | Установлено: *${esc(stats.installed)}*\n`;
-  text += `Рейтинг: *${esc(stats.averageRating.toFixed(1))}* ⭐\n\n`;
-  text += `*Категории:*\n`;
-  text += `💰 DeFi: ${esc(stats.byType.defi || 0)}\n`;
-  text += `📊 Аналитика: ${esc(stats.byType.analytics || 0)}\n`;
-  text += `🔔 Уведомления: ${esc(stats.byType.notification || 0)}\n`;
-  text += `🌐 Данные: ${esc(stats.byType['data-source'] || 0)}\n`;
-  text += `🔒 Безопасность: ${esc(stats.byType.security || 0)}\n\n`;
-  text += `Выберите плагин:`;
+  let text = `${pe('plugin')} <b>${lang === 'ru' ? 'Маркетплейс плагинов' : 'Plugin Marketplace'}</b>\n\n`;
+  text += `${lang === 'ru' ? 'Всего' : 'Total'}: <b>${stats.total}</b> | ${lang === 'ru' ? 'Установлено' : 'Installed'}: <b>${stats.installed}</b>\n`;
+  text += `${lang === 'ru' ? 'Рейтинг' : 'Rating'}: <b>${stats.averageRating.toFixed(1)}</b> ⭐\n\n`;
+  text += `<b>${lang === 'ru' ? 'Категории:' : 'Categories:'}</b>\n`;
+  text += `${pe('coin')} DeFi: ${stats.byType.defi || 0}\n`;
+  text += `${pe('chart')} ${lang === 'ru' ? 'Аналитика' : 'Analytics'}: ${stats.byType.analytics || 0}\n`;
+  text += `${pe('bell')} ${lang === 'ru' ? 'Уведомления' : 'Notifications'}: ${stats.byType.notification || 0}\n`;
+  text += `${pe('globe')} ${lang === 'ru' ? 'Данные' : 'Data'}: ${stats.byType['data-source'] || 0}\n`;
+  text += `🔒 ${lang === 'ru' ? 'Безопасность' : 'Security'}: ${stats.byType.security || 0}\n\n`;
+  text += `${lang === 'ru' ? 'Выберите плагин:' : 'Choose a plugin:'}`;
 
   const btns = plugins.slice(0, 6).map(p => [{
-    text: `${p.isInstalled ? '✅' : '⬜'} ${p.name} ${p.price > 0 ? `(${p.price} TON)` : '(бесплатно)'}`,
+    text: `${p.isInstalled ? peb('check') : peb('square')} ${p.name} ${p.price > 0 ? `(${p.price} TON)` : lang === 'ru' ? '(бесплатно)' : '(free)'}`,
     callback_data: `plugin:${p.id}`,
   }]);
-  btns.push([{ text: '📋 Все плагины', callback_data: 'plugins_all' }]);
+  btns.push([{ text: `${peb('clipboard')} ${lang === 'ru' ? 'Все плагины' : 'All plugins'}`, callback_data: 'plugins_all' }]);
 
-  await editOrReply(ctx, text, { reply_markup: { inline_keyboard: btns } });
+  await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: btns } });
 }
 
 async function showAllPlugins(ctx: Context) {
@@ -3653,29 +3816,30 @@ async function showPluginDetails(ctx: Context, pluginId: string) {
 // Workflow
 // ============================================================
 async function showWorkflows(ctx: Context, userId: number) {
+  const lang = getUserLang(userId);
   const engine = getWorkflowEngine();
   const workflows = engine.getUserWorkflows(userId);
   const templates = engine.getWorkflowTemplates();
 
-  let text = `⚡ *Workflow — цепочки агентов*\n\n`;
-  text += `Соединяйте агентов в автоматические цепочки\\.\n`;
-  text += `Например: _проверь баланс → если мало → уведоми_\n\n`;
+  let text = `${pe('bolt')} <b>Workflow — ${lang === 'ru' ? 'цепочки агентов' : 'agent chains'}</b>\n\n`;
+  text += `${lang === 'ru' ? 'Соединяйте агентов в автоматические цепочки.' : 'Connect agents into automatic chains.'}\n`;
+  text += `<i>${lang === 'ru' ? 'Например: проверь баланс → если мало → уведоми' : 'Example: check balance → if low → notify'}</i>\n\n`;
 
   if (workflows.length) {
-    text += `*Ваши workflow \\(${esc(workflows.length)}\\):*\n`;
+    text += `<b>${lang === 'ru' ? `Ваши workflow (${workflows.length}):` : `Your workflows (${workflows.length}):`}</b>\n`;
     workflows.forEach(wf => {
-      text += `⚡ ${esc(wf.name)} — ${esc(wf.nodes.length)} шагов\n`;
+      text += `${pe('bolt')} ${escHtml(wf.name)} — ${wf.nodes.length} ${lang === 'ru' ? 'шагов' : 'steps'}\n`;
     });
     text += '\n';
   }
 
-  text += `*Готовые шаблоны:*\n`;
-  templates.forEach((t, i) => { text += `${esc(i + 1)}\\. ${esc(t.name)}\n`; });
+  text += `<b>${lang === 'ru' ? 'Готовые шаблоны:' : 'Ready templates:'}</b>\n`;
+  templates.forEach((t, i) => { text += `${i + 1}. ${escHtml(t.name)}\n`; });
 
-  const btns = templates.map((t, i) => [{ text: `📋 ${t.name}`, callback_data: `workflow_template:${i}` }]);
-  btns.push([{ text: '🤖 Описать workflow (AI создаст)', callback_data: 'workflow_describe' }]);
-  btns.push([{ text: '➕ Выбрать шаблон', callback_data: 'workflow_create' }]);
-  await editOrReply(ctx, text, { reply_markup: { inline_keyboard: btns } });
+  const btns = templates.map((t, i) => [{ text: `${peb('clipboard')} ${t.name}`, callback_data: `workflow_template:${i}` }]);
+  btns.push([{ text: `${peb('robot')} ${lang === 'ru' ? 'Описать workflow (AI создаст)' : 'Describe workflow (AI creates)'}`, callback_data: 'workflow_describe' }]);
+  btns.push([{ text: `${peb('plus')} ${lang === 'ru' ? 'Выбрать шаблон' : 'Choose template'}`, callback_data: 'workflow_create' }]);
+  await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: btns } });
 }
 
 async function showWorkflowTemplate(ctx: Context, idx: number) {
@@ -3719,6 +3883,7 @@ async function createWorkflowFromTemplate(ctx: Context, userId: number, idx: num
 // Статистика
 // ============================================================
 async function showStats(ctx: Context, userId: number) {
+  const lang = getUserLang(userId);
   const r = await getDBTools().getUserAgents(userId);
   const agents = r.data || [];
   const active = agents.filter(a => a.isActive).length;
@@ -3734,46 +3899,46 @@ async function showStats(ctx: Context, userId: number) {
   const modelInfo = MODEL_LIST.find(m => m.id === currentModel);
 
   let text =
-    `📊 *Ваша панель управления*\n\n` +
-    `━━━ 🤖 Агенты ━━━\n` +
-    `Всего: *${esc(agents.length)}* · Активных: *${esc(active)}* · По расписанию: *${esc(scheduled)}*\n\n` +
-    `━━━ 💎 TON ━━━\n`;
+    `${pe('chart')} <b>${lang === 'ru' ? 'Ваша панель управления' : 'Your Dashboard'}</b>\n${div()}\n` +
+    `${pe('robot')} <b>${lang === 'ru' ? 'Агенты' : 'Agents'}</b>\n` +
+    `${lang === 'ru' ? 'Всего' : 'Total'}: <b>${agents.length}</b> · ${lang === 'ru' ? 'Активных' : 'Active'}: <b>${active}</b> · ${lang === 'ru' ? 'По расписанию' : 'Scheduled'}: <b>${scheduled}</b>\n\n` +
+    `${pe('diamond')} <b>TON</b>\n`;
 
   if (isConnected && wallet) {
-    text += `TON Connect: ✅ ${esc(wallet.walletName)}\n`;
-    text += `Адрес: \`${esc(wallet.friendlyAddress)}\`\n`;
+    text += `TON Connect: ${pe('check')} ${escHtml(wallet.walletName)}\n`;
+    text += `${lang === 'ru' ? 'Адрес' : 'Address'}: <code>${escHtml(wallet.friendlyAddress)}</code>\n`;
   } else {
-    text += `TON Connect: ❌ не подключён\n`;
+    text += `TON Connect: ❌ ${lang === 'ru' ? 'не подключён' : 'not connected'}\n`;
   }
 
   if (agentBalance !== null) {
-    text += `Агентский кошелёк: *${esc(agentBalance.toFixed(4))}* TON\n`;
+    text += `${lang === 'ru' ? 'Агентский кошелёк' : 'Agent wallet'}: <b>${agentBalance.toFixed(4)}</b> TON\n`;
   }
 
   text +=
-    `\n━━━ 🧠 AI ━━━\n` +
-    `Модель: ${esc(modelInfo?.icon || '')} *${esc(modelInfo?.label || currentModel)}*\n` +
-    `Авто\\-fallback: ✅ включён\n\n` +
-    `━━━ 🔌 Плагины ━━━\n` +
-    `Доступно: *${esc(pluginStats.total)}* · Установлено: *${esc(pluginStats.installed)}*`;
+    `\n${pe('brain')} <b>AI</b>\n` +
+    `${lang === 'ru' ? 'Модель' : 'Model'}: ${escHtml(modelInfo?.icon || '')} <b>${escHtml(modelInfo?.label || currentModel)}</b>\n` +
+    `${lang === 'ru' ? 'Авто-fallback' : 'Auto-fallback'}: ${pe('check')} ${lang === 'ru' ? 'включён' : 'enabled'}\n\n` +
+    `${pe('plugin')} <b>${lang === 'ru' ? 'Плагины' : 'Plugins'}</b>\n` +
+    `${lang === 'ru' ? 'Доступно' : 'Available'}: <b>${pluginStats.total}</b> · ${lang === 'ru' ? 'Установлено' : 'Installed'}: <b>${pluginStats.installed}</b>`;
 
   const keyboard: any[][] = [
     [
-      { text: '🤖 Мои агенты', callback_data: 'list_agents' },
-      { text: '🧠 Сменить модель', callback_data: 'model_selector' },
+      { text: `${peb('robot')} ${lang === 'ru' ? 'Мои агенты' : 'My agents'}`, callback_data: 'list_agents' },
+      { text: `${peb('brain')} ${lang === 'ru' ? 'Сменить модель' : 'Change model'}`, callback_data: 'model_selector' },
     ],
   ];
   if (isConnected) {
-    keyboard.push([{ text: '💎 TON кошелёк', callback_data: 'ton_connect' }]);
+    keyboard.push([{ text: `${peb('diamond')} ${lang === 'ru' ? 'TON кошелёк' : 'TON wallet'}`, callback_data: 'ton_connect' }]);
   } else {
-    keyboard.push([{ text: '💎 Подключить TON', callback_data: 'ton_connect' }]);
+    keyboard.push([{ text: `${peb('diamond')} ${lang === 'ru' ? 'Подключить TON' : 'Connect TON'}`, callback_data: 'ton_connect' }]);
   }
-  keyboard.push([{ text: '🌐 Открыть дашборд', url: 'https://tonagentplatform.ru/dashboard.html' }]);
+  keyboard.push([{ text: `${peb('globe')} ${lang === 'ru' ? 'Открыть дашборд' : 'Open dashboard'}`, url: 'https://tonagentplatform.ru/dashboard.html' }]);
   if (isOwner) {
-    keyboard.push([{ text: '⚙️ Настройки платформы', callback_data: 'platform_settings' }]);
+    keyboard.push([{ text: `⚙️ ${lang === 'ru' ? 'Настройки платформы' : 'Platform settings'}`, callback_data: 'platform_settings' }]);
   }
 
-  await editOrReply(ctx, text, { reply_markup: { inline_keyboard: keyboard } });
+  await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } });
 }
 
 // ============================================================
@@ -3781,22 +3946,23 @@ async function showStats(ctx: Context, userId: number) {
 // ============================================================
 async function showModelSelector(ctx: Context) {
   const userId = ctx.from!.id;
+  const lang = getUserLang(userId);
   const current = getUserModel(userId);
   const currentInfo = MODEL_LIST.find(m => m.id === current);
 
   let text =
-    `🧠 *Выбор AI модели*\n\n` +
-    `Активная: ${esc(currentInfo?.icon || '')} *${esc(currentInfo?.label || current)}*\n\n` +
-    `При недоступности — бот автоматически пробует следующую модель в цепочке\\.\n\n` +
-    `*Доступные модели:*\n`;
+    `${pe('brain')} <b>${lang === 'ru' ? 'Выбор AI модели' : 'Choose AI Model'}</b>\n\n` +
+    `${lang === 'ru' ? 'Активная' : 'Active'}: ${escHtml(currentInfo?.icon || '')} <b>${escHtml(currentInfo?.label || current)}</b>\n\n` +
+    `${lang === 'ru' ? 'При недоступности — бот автоматически пробует следующую модель в цепочке.' : 'If unavailable — bot automatically tries the next model in the chain.'}\n\n` +
+    `<b>${lang === 'ru' ? 'Доступные модели:' : 'Available models:'}</b>\n`;
 
   MODEL_LIST.forEach(m => {
     const isCurrent = m.id === current;
     const tags: string[] = [];
-    if ((m as any).recommended) tags.push('⭐ рекомендована');
-    if ((m as any).fast) tags.push('⚡ быстрая');
-    const tagStr = tags.length ? ` — _${esc(tags.join(', '))}_` : '';
-    text += `${isCurrent ? '▶️' : '  '} ${m.icon} ${esc(m.label)}${esc(isCurrent ? ' ✅' : '')}${tagStr}\n`;
+    if ((m as any).recommended) tags.push(lang === 'ru' ? '⭐ рекомендована' : '⭐ recommended');
+    if ((m as any).fast) tags.push(lang === 'ru' ? '⚡ быстрая' : '⚡ fast');
+    const tagStr = tags.length ? ` — <i>${escHtml(tags.join(', '))}</i>` : '';
+    text += `${isCurrent ? '▶️' : '  '} ${escHtml(m.icon)} ${escHtml(m.label)}${isCurrent ? ' ✅' : ''}${tagStr}\n`;
   });
 
   const btns = MODEL_LIST.map(m => [{
@@ -3804,7 +3970,7 @@ async function showModelSelector(ctx: Context) {
     callback_data: `set_model:${m.id}`,
   }]);
 
-  await editOrReply(ctx, text, { reply_markup: { inline_keyboard: btns } });
+  await editOrReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: btns } });
 }
 
 // ============================================================
@@ -3813,47 +3979,48 @@ async function showModelSelector(ctx: Context) {
 
 async function showSubscription(ctx: Context) {
   const userId = ctx.from!.id;
+  const lang = getUserLang(userId);
   const sub = await getUserSubscription(userId);
   const plan = PLANS[sub.planId] || PLANS.free;
   const isOwner = userId === OWNER_ID_NUM;
 
   let text =
-    `💳 *Подписка*\n\n` +
-    `Текущий план: ${formatSubscription(sub)}\n\n` +
-    `━━━ ${plan.icon} ${esc(plan.name)} ━━━\n`;
+    `${pe('card')} <b>${lang === 'ru' ? 'Подписка' : 'Subscription'}</b>\n\n` +
+    `${lang === 'ru' ? 'Текущий план' : 'Current plan'}: ${escHtml(formatSubscription(sub))}\n\n` +
+    `${div()}\n${escHtml(plan.icon)} <b>${escHtml(plan.name)}</b>\n`;
 
-  plan.features.forEach(f => { text += `✅ ${esc(f)}\n`; });
+  plan.features.forEach(f => { text += `${pe('check')} ${escHtml(f)}\n`; });
 
   // Показываем использование генераций
   const genUsed = getGenerationsUsed(userId);
   const genLimit = plan.generationsPerMonth === -1 ? '∞' : String(plan.generationsPerMonth);
-  text += `\n⚡ Генерации AI: *${esc(genUsed)}/${esc(genLimit)}* в этом месяце\n`;
+  text += `\n${pe('bolt')} ${lang === 'ru' ? 'Генерации AI' : 'AI generations'}: <b>${genUsed}/${genLimit}</b> ${lang === 'ru' ? 'в этом месяце' : 'this month'}\n`;
   if (plan.pricePerGeneration > 0) {
-    text += `💸 Цена за генерацию: *${esc(plan.pricePerGeneration)} TON*\n`;
+    text += `${pe('money')} ${lang === 'ru' ? 'Цена за генерацию' : 'Price per generation'}: <b>${plan.pricePerGeneration} TON</b>\n`;
   }
 
   if (!isOwner && plan.id === 'free') {
     text +=
-      `\n💡 *Upgrade для большего:*\n` +
-      `• До 100 агентов одновременно\n` +
-      `• Включённые генерации AI/мес\n` +
-      `• Расписание + Webhook + Workflow\n` +
-      `• API доступ`;
+      `\n${pe('sparkles')} <b>${lang === 'ru' ? 'Upgrade для большего:' : 'Upgrade for more:'}</b>\n` +
+      `• ${lang === 'ru' ? 'До 100 агентов одновременно' : 'Up to 100 agents'}\n` +
+      `• ${lang === 'ru' ? 'Включённые генерации AI/мес' : 'Included AI generations/month'}\n` +
+      `• ${lang === 'ru' ? 'Расписание + Webhook + Workflow' : 'Schedule + Webhook + Workflow'}\n` +
+      `• ${lang === 'ru' ? 'API доступ' : 'API access'}`;
   } else if (!isOwner && sub.expiresAt) {
     const days = Math.ceil((sub.expiresAt.getTime() - Date.now()) / 86400000);
-    text += `\n⏳ Истекает через *${esc(days)}* дн\\.`;
+    text += `\n${pe('hourglass')} ${lang === 'ru' ? 'Истекает через' : 'Expires in'} <b>${days}</b> ${lang === 'ru' ? 'дн.' : 'days'}`;
   }
 
   const btns: any[][] = [];
   if (!isOwner) {
-    btns.push([{ text: '🚀 Улучшить план', callback_data: 'plans_menu' }]);
+    btns.push([{ text: `${peb('rocket')} ${lang === 'ru' ? 'Улучшить план' : 'Upgrade plan'}`, callback_data: 'plans_menu' }]);
   }
   btns.push([
-    { text: '🤖 Мои агенты', callback_data: 'list_agents' },
-    { text: '💎 TON Connect', callback_data: 'ton_connect' },
+    { text: `${peb('robot')} ${lang === 'ru' ? 'Мои агенты' : 'My agents'}`, callback_data: 'list_agents' },
+    { text: `${peb('diamond')} TON Connect`, callback_data: 'ton_connect' },
   ]);
 
-  await safeReply(ctx, text, { reply_markup: { inline_keyboard: btns } });
+  await safeReply(ctx, text, { parse_mode: 'HTML', reply_markup: { inline_keyboard: btns } });
 }
 
 async function showPlans(ctx: Context) {
@@ -3862,7 +4029,7 @@ async function showPlans(ctx: Context) {
 
   let text =
     `💎 *Планы TON Agent Platform*\n` +
-    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `${div()}\n` +
     `_Оплата в TON · напрямую · без посредников_\n\n`;
 
   const planOrder = ['free', 'starter', 'pro', 'unlimited'];
@@ -3915,7 +4082,7 @@ async function showPaymentInvoice(ctx: Context, planId: string, period: 'month' 
     `💳 *Оплата подписки*\n\n` +
     `${plan.icon} *${esc(plan.name)}* на ${esc(periodLabel)}\n` +
     `Сумма: *${esc(payment.amountTon)} TON*\n\n` +
-    `━━━ Способы оплаты ━━━\n\n`;
+    `💳 *Способы оплаты*\n\n`;
 
   if (isConnected) {
     text +=
@@ -3989,44 +4156,70 @@ async function checkPaymentStatus(ctx: Context) {
 // Помощь
 // ============================================================
 async function showHelp(ctx: Context) {
-  const text =
-    `❓ *TON Agent Platform — Справка*\n\n` +
-    `━━━ 🚀 Как создать агента ━━━\n\n` +
-    `Просто напишите задачу своими словами:\n` +
-    `_"проверяй баланс кошелька UQ\\.\\.\\. каждый час"_\n` +
-    `_"следи за ценой TON, уведоми если выше 5\\$"_\n` +
-    `_"каждое 10\\-е число отправляй 50 TON на UQ\\.\\.\\."_\n\n` +
-    `Агент создаётся автоматически и запускается на нашем сервере — *ничего устанавливать не нужно*\\.\n\n` +
-    `━━━ 📋 Команды ━━━\n\n` +
-    `/start — главное меню\n` +
-    `/list — мои агенты\n` +
-    `/run ID — запустить агента \\(пример: /run 3\\)\n` +
-    `/config — мои переменные \\(ключи, адреса\\)\n` +
-    `/model — выбрать AI модель\n` +
-    `/sub — моя подписка\n` +
-    `/plans — тарифы и оплата\n` +
-    `/connect — подключить TON кошелёк \\(Tonkeeper\\)\n` +
-    `/wallet — агентский кошелёк \\(без мобильного приложения\\)\n` +
-    `/marketplace — готовые шаблоны агентов\n\n` +
-    `━━━ 💡 Что умеют агенты ━━━\n\n` +
-    `• Работать с *любыми* публичными API\n` +
-    `• Мониторить TON\\-кошельки и цены\n` +
-    `• Отправлять TON по расписанию\n` +
-    `• Делать запросы к DEX \\(DeDust, STON\\.fi\\)\n` +
-    `• Уведомлять вас в Telegram`;
+  const lang = getUserLang(ctx.from?.id || 0);
+  const text = lang === 'ru'
+    ? `${pe('question')} <b>TON Agent Platform — Справка</b>\n\n` +
+      `${pe('rocket')} <b>Как создать агента</b>\n\n` +
+      `Просто напишите задачу своими словами:\n` +
+      `<i>"проверяй баланс кошелька UQ... каждый час"</i>\n` +
+      `<i>"следи за ценой TON, уведоми если выше $5"</i>\n` +
+      `<i>"каждое 10-е число отправляй 50 TON на UQ..."</i>\n\n` +
+      `Агент создаётся автоматически и запускается на нашем сервере — <b>ничего устанавливать не нужно</b>.\n\n` +
+      `${pe('clipboard')} <b>Команды</b>\n\n` +
+      `/start — главное меню\n` +
+      `/list — мои агенты\n` +
+      `/run ID — запустить агента (пример: /run 3)\n` +
+      `/config — мои переменные (ключи, адреса)\n` +
+      `/model — выбрать AI модель\n` +
+      `/sub — моя подписка\n` +
+      `/plans — тарифы и оплата\n` +
+      `/connect — подключить TON кошелёк (Tonkeeper)\n` +
+      `/wallet — агентский кошелёк (без мобильного приложения)\n` +
+      `/marketplace — готовые шаблоны агентов\n\n` +
+      `${pe('sparkles')} <b>Что умеют агенты</b>\n\n` +
+      `• Работать с <b>любыми</b> публичными API\n` +
+      `• Мониторить TON-кошельки и цены\n` +
+      `• Отправлять TON по расписанию\n` +
+      `• Делать запросы к DEX (DeDust, STON.fi)\n` +
+      `• Уведомлять вас в Telegram`
+    : `${pe('question')} <b>TON Agent Platform — Help</b>\n\n` +
+      `${pe('rocket')} <b>How to create an agent</b>\n\n` +
+      `Just describe your task in plain words:\n` +
+      `<i>"check wallet balance UQ... every hour"</i>\n` +
+      `<i>"monitor TON price, alert if above $5"</i>\n` +
+      `<i>"send 50 TON to UQ... on the 10th of each month"</i>\n\n` +
+      `Agent is created automatically and runs on our server — <b>nothing to install</b>.\n\n` +
+      `${pe('clipboard')} <b>Commands</b>\n\n` +
+      `/start — main menu\n` +
+      `/list — my agents\n` +
+      `/run ID — run agent (example: /run 3)\n` +
+      `/config — my variables (keys, addresses)\n` +
+      `/model — choose AI model\n` +
+      `/sub — my subscription\n` +
+      `/plans — pricing\n` +
+      `/connect — connect TON wallet (Tonkeeper)\n` +
+      `/wallet — agent wallet (no mobile app needed)\n` +
+      `/marketplace — ready-made agent templates\n\n` +
+      `${pe('sparkles')} <b>What agents can do</b>\n\n` +
+      `• Work with <b>any</b> public API\n` +
+      `• Monitor TON wallets and prices\n` +
+      `• Send TON on schedule\n` +
+      `• Query DEX (DeDust, STON.fi)\n` +
+      `• Notify you in Telegram`;
 
   await safeReply(ctx, text, {
+    parse_mode: 'HTML',
     reply_markup: {
       inline_keyboard: [
         [
-          { text: '🏪 Маркетплейс', callback_data: 'marketplace' },
-          { text: '🤖 Мои агенты', callback_data: 'list_agents' },
+          { text: `${peb('store')} ${lang === 'ru' ? 'Маркетплейс' : 'Marketplace'}`, callback_data: 'marketplace' },
+          { text: `${peb('robot')} ${lang === 'ru' ? 'Мои агенты' : 'My agents'}`, callback_data: 'list_agents' },
         ],
         [
-          { text: '🧠 AI модель', callback_data: 'model_selector' },
-          { text: '💎 TON кошелёк', callback_data: 'ton_connect' },
+          { text: `${peb('brain')} ${lang === 'ru' ? 'AI модель' : 'AI model'}`, callback_data: 'model_selector' },
+          { text: `${peb('diamond')} TON ${lang === 'ru' ? 'кошелёк' : 'wallet'}`, callback_data: 'ton_connect' },
         ],
-        [{ text: '🌐 Открыть дашборд', url: 'https://tonagentplatform.ru/dashboard.html' }],
+        [{ text: `${peb('globe')} ${lang === 'ru' ? 'Открыть дашборд' : 'Open dashboard'}`, url: 'https://tonagentplatform.ru/dashboard.html' }],
       ],
     },
   });

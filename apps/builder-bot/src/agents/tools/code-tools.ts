@@ -228,6 +228,9 @@ export class CodeTools {
   notify(text)                    — send Telegram message to user. THE ONLY WAY to message user.
   getTonBalance(address)          — returns TON balance as float (e.g. 5.2341). Handles nanotons.
   getPrice("TON")                 — returns USD price from CoinGecko (e.g. 3.21)
+  searchNFTCollection(name)       — search NFT collection by name via GetGems API
+                                    returns { address, name, floorTon, items } or null
+  getNFTFloorPrice(address)       — get floor price of NFT collection by address (TON)
   getState("key")                 — get persistent value (null if first run)
   setState("key", value)          — save value (survives between loop iterations)
   sleep(ms)                       — pause for N milliseconds (use inside while loop)
@@ -275,9 +278,38 @@ async function agent(context) {
 }
 
 ━━━ AVAILABLE APIs (public, no auth needed) ━━━
-TON: toncenter.com/api/v2/getAddressBalance?address=X | tonapi.io/v2/accounts/X/events | tonapi.io/v2/accounts/X/jettons/balances
-Prices: api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd | api.binance.com/api/v3/ticker/price?symbol=TONUSDT
+TON balances/txs: toncenter.com/api/v2/getAddressBalance?address=X | tonapi.io/v2/accounts/X/events
+Prices: api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd
+DEX: api.ston.fi/v1/assets | api.dedust.io/v2/pools
 Any other public REST API — just use fetch()
+
+━━━ NFT MONITORING PATTERN (USE BUILT-IN FUNCTIONS) ━━━
+For ANY NFT collection monitoring task, use these built-in functions:
+
+  // Step 1: Find collection (cache the result)
+  var col = getState('nft_col');
+  if (!col) {
+    col = await searchNFTCollection('Cupid Charm');  // returns {address, name, floorTon, items} or null
+    if (!col) { notify('Collection not found'); return; }
+    setState('nft_col', col);
+  }
+
+  // Step 2: Get current floor price
+  var floorTon = await getNFTFloorPrice(col.address);  // returns floor price in TON
+
+  // Step 3: Get TON price in USD
+  var tonUsd = await getPrice('TON');
+  var floorUsd = (floorTon * tonUsd).toFixed(0);
+
+  notify('Floor: ' + floorTon.toFixed(2) + ' TON ($' + floorUsd + ')');
+
+━━━ CRITICAL RULES — NO HARDCODE ━━━
+• NEVER hardcode wallet addresses, collection addresses, API keys, or any user-specific data
+• ALL configurable values MUST come from context.config.KEY or be passed as {{PLACEHOLDER}}
+• For NFT monitoring: ALWAYS use searchNFTCollection() and getNFTFloorPrice() built-in functions
+• Cache found collection: setState('nft_col', col) — check getState('nft_col') first
+• For any "monitor X" task: always fetch REAL data from APIs, never use fake/random values
+• If collection not found: notify user with clear error, do NOT use fallback hardcoded data
 
 ━━━ PLACEHOLDERS ━━━
 Use {{NAME}} for values user must configure. Read from context.config:
