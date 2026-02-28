@@ -488,7 +488,7 @@ export class ExecutionTools {
           // Возвращает floor price в TON (0 если нет листингов)
           getNFTFloorPrice: async (address: string): Promise<number> => {
             try {
-              // Конвертируем EQ адрес в raw формат
+              // Конвертируем EQ/UQ адрес в raw формат (0:hex)
               let rawAddr = address;
               if (address && !address.startsWith('0:')) {
                 try {
@@ -498,11 +498,39 @@ export class ExecutionTools {
                   rawAddr = '0:' + buf.slice(2, 34).toString('hex');
                 } catch {}
               }
+
+              // Метод 1: GetGems GraphQL — прямой запрос floor price по адресу (самый точный)
+              try {
+                const ggBody = JSON.stringify({
+                  query: `{ nftCollectionByAddress(address: "${rawAddr}") { floorPrice approximateItemsCount } }`,
+                });
+                const ggResp = await nativeFetch('https://api.getgems.io/graphql', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'Origin': 'https://getgems.io',
+                    'Referer': 'https://getgems.io/',
+                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                  },
+                  body: ggBody,
+                });
+                if (ggResp.ok) {
+                  const ggData = await ggResp.json() as any;
+                  const fp = ggData?.data?.nftCollectionByAddress?.floorPrice;
+                  if (fp && parseInt(fp) > 0) return parseInt(fp) / 1e9;
+                }
+              } catch {}
+
+              // Метод 2: TonAPI — сканируем items в поиске активных продаж
+              const tonapiKey = process.env.TONAPI_KEY || '';
+              const tonapiHeaders: Record<string, string> = { 'Accept': 'application/json' };
+              if (tonapiKey) tonapiHeaders['Authorization'] = `Bearer ${tonapiKey}`;
               const prices: number[] = [];
-              for (let offset = 0; offset < 200; offset += 100) {
+              for (let offset = 0; offset < 400; offset += 100) {
                 const r = await nativeFetch(
                   `https://tonapi.io/v2/nfts/collections/${rawAddr}/items?limit=100&offset=${offset}`,
-                  { headers: { 'Accept': 'application/json' } }
+                  { headers: tonapiHeaders }
                 );
                 if (!r.ok) break;
                 const d = await r.json() as any;
@@ -512,6 +540,8 @@ export class ExecutionTools {
                   const val = item?.sale?.price?.value;
                   if (val && parseInt(val) > 0) prices.push(parseInt(val) / 1e9);
                 }
+                // Нашли листинги в первых 100 — не нужно сканировать дальше
+                if (prices.length >= 5) break;
               }
               prices.sort((a: number, b: number) => a - b);
               return prices.length > 0 ? prices[0] : 0;
