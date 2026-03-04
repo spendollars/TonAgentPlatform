@@ -715,17 +715,56 @@ export class Orchestrator {
     return `${ms / 1000} сек`;
   }
 
-  private getAIErrorHint(err: any): string {
-    const msg: string = err?.message || err?.error?.message || '';
-    if (msg.includes('cooldown')) {
-      const sec = msg.match(/(\d+(?:\.\d+)?)s/)?.[1];
-      return sec ? `⏳ Прокси на cooldown, повторите через ~${Math.ceil(parseFloat(sec))} сек.` : '⏳ Прокси перегружен, подождите немного.';
+  // ===== Определение intent'а через AI =====
+
+  private async detectIntent(message: string): Promise<UserIntent> {
+    // Все запросы проходят через AI — никаких шаблонных ключевых слов.
+    // AI сам понимает что хочет пользователь и выбирает нужный intent.
+    try {
+      return await this.classifyIntentWithAI(message);
+    } catch {
+      return 'general_chat';
     }
-    if (msg.includes('exhausted')) return '🔄 Все Kiro-токены исчерпаны. Нужна переавторизация.';
-    if (msg.includes('INSUFFICIENT_MODEL_CAPACITY')) return '🔄 Высокая нагрузка на модель, попробуйте через 30 секунд.';
-    if (msg.includes('ECONNREFUSED') || msg.includes('fetch failed')) return '🔌 Прокси недоступен. Проверьте что CLIProxyAPIPlus запущен.';
-    if (msg.includes('Invalid API key') || msg.includes('Missing API key')) return '🔑 Неверный API-ключ в .env (ANTHROPIC_API_KEY).';
-    return '🔄 Попробуйте ещё раз через несколько секунд.';
+  }
+
+  /** AI-классификация intent — единственная точка принятия решений */
+  private async classifyIntentWithAI(message: string): Promise<UserIntent> {
+    const { text } = await callWithFallback([
+      {
+        role: 'system',
+        content: `You are an intent classifier for a TON blockchain agent platform.
+Analyze the user message and return ONLY one category name — nothing else, no explanations.
+
+Categories:
+- create_agent: user wants to build/create/make an agent, bot, script, automation; wants to monitor/track something, send scheduled notifications, fetch data periodically, set up triggers or cron jobs, automate any task
+- edit_agent: user wants to change/update/modify/fix an existing agent
+- run_agent: user wants to start/run/execute/activate an existing agent
+- delete_agent: user wants to delete/remove an agent
+- list_agents: user wants to see/list their agents, check how many agents they have
+- explain_agent: user wants to understand/explain what an agent does or how it works
+- debug_agent: user wants to find bugs, debug, audit, or fix errors in an agent
+- nft_analysis: user asks about NFT prices, floor prices, NFT collections (TON Punks, diamonds, etc.), NFT market, GetGems, Fragment, Telegram Gifts, NFT trading
+- platform_settings: user asks about platform configuration or server settings
+- user_management: user asks about managing users on the platform
+- general_chat: everything else — questions, greetings, help, general conversation
+
+Rules:
+- If the message describes ANY goal involving automation, scheduling, monitoring, notifications → create_agent
+- If the message is about NFT market data, prices, collections → nft_analysis
+- When in doubt between create_agent and general_chat, prefer create_agent for task-like descriptions
+- Reply with ONLY the category name, no punctuation, no explanation`,
+      },
+      { role: 'user', content: message },
+    ], 0, 15);
+
+    const result = text.trim().toLowerCase().replace(/[^a-z_]/g, '');
+    const valid: UserIntent[] = [
+      'create_agent', 'edit_agent', 'run_agent', 'delete_agent',
+      'list_agents', 'explain_agent', 'debug_agent', 'nft_analysis',
+      'platform_settings', 'user_management', 'general_chat',
+    ];
+    const matched = valid.find(v => result.includes(v));
+    return matched ?? 'general_chat';
   }
 
   // ── Публичные методы ───────────────────────────────────────────────────
