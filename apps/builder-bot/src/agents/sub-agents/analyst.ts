@@ -15,7 +15,7 @@ export interface ExplainParams {
 export interface DebugParams {
   code: string;
   expectedBehavior?: string;
-  errorMessage?: string;
+  errorMessage?: string; // Сообщение об ошибке для контекста
 }
 
 // Результат анализа
@@ -91,7 +91,9 @@ export class AnalystAgent {
     try {
       const result = await this.codeTools.findBugs({
         code: params.code,
-        expectedBehavior: params.expectedBehavior,
+        expectedBehavior: params.errorMessage
+          ? `Expected no errors. Known error: ${params.errorMessage}`
+          : params.expectedBehavior,
       });
 
       if (!result.success) {

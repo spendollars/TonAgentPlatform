@@ -8,6 +8,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="dashboard.css">
+  <!-- TON Connect UI SDK -->
+  <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
   <!-- Telegram widget loaded in body where button should appear -->
 </head>
 <body>
@@ -142,6 +144,18 @@
         </div>
         
         <div class="nav-section">
+          <span class="nav-label" data-en="Finance" data-ru="Финансы">Finance</span>
+          <a href="#" class="nav-item" data-page="balance">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 6v6l4 2"/>
+            </svg>
+            <span data-en="Balance" data-ru="Баланс">Balance</span>
+            <span class="balance-nav-badge" id="balance-nav-amount">—</span>
+          </a>
+        </div>
+
+        <div class="nav-section">
           <span class="nav-label" data-en="System" data-ru="Система">System</span>
           <a href="#" class="nav-item" data-page="settings">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -154,6 +168,25 @@
       </nav>
       
       <div class="sidebar-footer">
+        <!-- Balance Widget in Sidebar -->
+        <div class="sidebar-balance-widget" id="sidebar-balance-widget" onclick="navigateTo('balance')" title="Balance — click to deposit">
+          <div class="sidebar-balance-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 8v4l3 3"/>
+            </svg>
+          </div>
+          <div class="sidebar-balance-info">
+            <span class="sidebar-balance-label" data-en="Balance" data-ru="Баланс">Balance</span>
+            <span class="sidebar-balance-value" id="sidebar-balance-value">— TON</span>
+          </div>
+          <div class="sidebar-balance-action">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+          </div>
+        </div>
+
         <div class="user-card" style="cursor:pointer" title="Profile" onclick="navigateTo('profile')">
           <img id="user-avatar" src="" alt="" class="user-avatar-img hidden">
           <div class="user-avatar-fallback hidden" id="user-avatar-fallback">
@@ -1102,6 +1135,131 @@
               <a href="https://t.me/TonAgentPlatformBot" target="_blank" style="color:var(--primary)">@TonAgentPlatformBot</a>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Balance Page -->
+      <div id="balance-page" class="page">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title" data-en="Balance" data-ru="Баланс">Balance</h1>
+            <p class="page-subtitle" data-en="Your internal platform balance and deposit history" data-ru="Внутренний баланс платформы и история пополнений">Your internal platform balance and deposit history</p>
+          </div>
+          <button class="btn btn-ghost" onclick="loadBalance()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="refresh-icon">
+              <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            <span data-en="Refresh" data-ru="Обновить">Refresh</span>
+          </button>
+        </div>
+        <div class="page-content">
+
+          <!-- Balance Cards -->
+          <div class="balance-cards-grid">
+            <!-- Main Balance Card -->
+            <div class="balance-main-card">
+              <div class="balance-card-glow"></div>
+              <div class="balance-card-header">
+                <div class="balance-card-icon">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 6v6l4 2"/>
+                  </svg>
+                </div>
+                <div>
+                  <span class="balance-card-label" data-en="Available Balance" data-ru="Доступный баланс">Available Balance</span>
+                  <div class="balance-card-amount" id="balance-amount">
+                    <span class="balance-ton-value" id="balance-ton-value">0.0000</span>
+                    <span class="balance-ton-symbol">TON</span>
+                  </div>
+                  <div class="balance-usd-equiv" id="balance-usd-equiv">≈ $0.00</div>
+                </div>
+              </div>
+              <div class="balance-card-stats">
+                <div class="balance-stat">
+                  <span class="balance-stat-label" data-en="Total Deposited" data-ru="Всего пополнено">Total Deposited</span>
+                  <span class="balance-stat-value" id="balance-total-deposited">0.0000 TON</span>
+                </div>
+                <div class="balance-stat">
+                  <span class="balance-stat-label" data-en="Total Spent" data-ru="Всего потрачено">Total Spent</span>
+                  <span class="balance-stat-value" id="balance-total-spent">0.0000 TON</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Deposit Card -->
+            <div class="deposit-card">
+              <div class="deposit-card-header">
+                <h3 data-en="Deposit TON" data-ru="Пополнить TON">Deposit TON</h3>
+                <span class="deposit-badge" data-en="Instant" data-ru="Мгновенно">Instant</span>
+              </div>
+
+              <!-- TON Connect Button -->
+              <div class="tonconnect-section">
+                <div id="ton-connect-button-container"></div>
+                <p class="tonconnect-desc" data-en="Connect your TON wallet to deposit directly" data-ru="Подключите TON кошелёк для прямого пополнения">Connect your TON wallet to deposit directly</p>
+              </div>
+
+              <div class="deposit-divider">
+                <span data-en="or send manually" data-ru="или отправьте вручную">or send manually</span>
+              </div>
+
+              <!-- Manual Deposit Address -->
+              <div class="deposit-address-section">
+                <label class="deposit-address-label" data-en="Platform Address" data-ru="Адрес платформы">Platform Address</label>
+                <div class="deposit-address-box">
+                  <div class="deposit-address-dns">agentplatform.ton</div>
+                  <div class="deposit-address-raw" id="deposit-address-raw">UQCfRrLVr7MeGbVw4x1XgZ42ZUS7tdf2sEYSyRvmoEB4y_dh</div>
+                  <button class="btn btn-ghost btn-sm deposit-copy-btn" onclick="copyDepositAddress()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                    </svg>
+                    <span data-en="Copy" data-ru="Копировать">Copy</span>
+                  </button>
+                </div>
+                <p class="deposit-note" data-en="Send any amount of TON to this address. Balance updates automatically." data-ru="Отправьте любое количество TON на этот адрес. Баланс обновляется автоматически.">Send any amount of TON to this address. Balance updates automatically.</p>
+              </div>
+
+              <!-- Quick Deposit via TON Connect -->
+              <div class="quick-deposit-section" id="quick-deposit-section" style="display:none">
+                <label class="deposit-address-label" data-en="Quick Deposit Amount" data-ru="Быстрое пополнение">Quick Deposit Amount</label>
+                <div class="quick-deposit-amounts">
+                  <button class="quick-amount-btn" onclick="quickDeposit(1)">1 TON</button>
+                  <button class="quick-amount-btn" onclick="quickDeposit(5)">5 TON</button>
+                  <button class="quick-amount-btn" onclick="quickDeposit(10)">10 TON</button>
+                  <button class="quick-amount-btn" onclick="quickDeposit(50)">50 TON</button>
+                </div>
+                <div class="custom-deposit-row">
+                  <input type="number" class="form-input" id="custom-deposit-amount" placeholder="Custom amount (TON)" min="0.1" step="0.1">
+                  <button class="btn btn-primary" onclick="quickDepositCustom()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                    <span data-en="Deposit" data-ru="Пополнить">Deposit</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Transaction History -->
+          <div class="panel" style="margin-top:1.5rem">
+            <div class="panel-header">
+              <h3 class="panel-title" data-en="Transaction History" data-ru="История транзакций">Transaction History</h3>
+              <button class="btn btn-ghost btn-sm" onclick="loadBalanceTransactions()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+              </button>
+            </div>
+            <div id="balance-transactions-list">
+              <div class="loading-placeholder" data-en="Loading transactions..." data-ru="Загрузка транзакций...">Loading transactions...</div>
+            </div>
+          </div>
+
         </div>
       </div>
 

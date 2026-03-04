@@ -363,17 +363,17 @@ async function startBotAuth() {
   }
 
   _botAuthToken = data.authToken;
-  window.open(data.botLink, '_blank');
-
+  // Do NOT use window.open() — it gets blocked by popup blockers after async calls.
+  // Instead show a prominent <a> link the user clicks directly (real user gesture).
   if (container) {
     container.innerHTML = `
       <div style="text-align:center;padding:8px 0 16px">
-        <div style="font-size:2rem;margin-bottom:8px;">📱</div>
-        <p style="color:var(--text-secondary);font-size:.875rem;margin-bottom:4px;font-weight:500;">Ожидаю подтверждения в Telegram...</p>
-        <p style="color:var(--text-muted);font-size:.75rem;margin-bottom:16px;">Нажмите /start в боте — он откроется автоматически</p>
+        <div style="font-size:1.75rem;margin-bottom:10px;">📲</div>
+        <p style="color:var(--text-secondary);font-size:.9rem;margin-bottom:4px;font-weight:500;">Откройте Telegram и нажмите Start</p>
+        <p style="color:var(--text-muted);font-size:.75rem;margin-bottom:16px;">После нажатия /start страница обновится автоматически</p>
         <a href="${escHtml(data.botLink)}" target="_blank"
-           style="display:inline-flex;align-items:center;gap:6px;padding:8px 18px;background:rgba(33,150,243,.15);color:#2196F3;border:1px solid rgba(33,150,243,.3);border-radius:6px;font-size:.8125rem;text-decoration:none;margin-bottom:10px;">
-          🤖 Открыть бота снова
+           style="display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 28px;background:#2196F3;color:#fff;border-radius:8px;font-size:.9375rem;font-weight:600;text-decoration:none;margin-bottom:16px;min-width:200px;">
+          🤖 Открыть Telegram
         </a><br>
         <button onclick="cancelBotAuth()"
           style="background:none;border:none;color:var(--text-muted);font-size:.8125rem;cursor:pointer;text-decoration:underline;">
