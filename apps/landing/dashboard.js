@@ -3127,11 +3127,191 @@ async function deleteKnowledgeEntry(idx) {
   }
 }
 
+// ===== TELEGRAM USERBOT =====
+
+async function loadTelegramStatus() {
+  const statusEl = document.getElementById('tg-userbot-status');
+  const connectedEl = document.getElementById('tg-connected-info');
+  const authEl = document.getElementById('tg-auth-methods');
+  if (!statusEl) return;
+
+  try {
+    const data = await apiRequest('GET', '/api/telegram/status');
+    if (data && data.authorized) {
+      statusEl.textContent = _lang === 'ru' ? 'Подключён' : 'Connected';
+      statusEl.className = 'credential-status active';
+      if (connectedEl) connectedEl.style.display = 'block';
+      if (authEl) authEl.style.display = 'none';
+
+      const nameEl = document.getElementById('tg-account-name');
+      const detailsEl = document.getElementById('tg-account-details');
+      if (nameEl) nameEl.textContent = [data.firstName, data.lastName].filter(Boolean).join(' ') || 'Telegram User';
+      if (detailsEl) {
+        const parts = [];
+        if (data.username) parts.push('@' + data.username);
+        if (data.phone) parts.push(data.phone);
+        if (data.userId) parts.push('ID: ' + data.userId);
+        detailsEl.textContent = parts.join(' · ');
+      }
+    } else {
+      statusEl.textContent = _lang === 'ru' ? 'Не подключён' : 'Disconnected';
+      statusEl.className = 'credential-status';
+      if (connectedEl) connectedEl.style.display = 'none';
+      if (authEl) authEl.style.display = 'block';
+    }
+  } catch {
+    statusEl.textContent = 'Error';
+    statusEl.className = 'credential-status';
+    if (authEl) authEl.style.display = 'block';
+  }
+}
+
+let _tgQrPollTimer = null;
+
+async function startTgQRLogin() {
+  const qrArea = document.getElementById('tg-qr-area');
+  const phoneArea = document.getElementById('tg-phone-area');
+  const qrImg = document.getElementById('tg-qr-image');
+  const qrLoading = document.getElementById('tg-qr-loading');
+  if (qrArea) qrArea.style.display = 'block';
+  if (phoneArea) phoneArea.style.display = 'none';
+  if (qrImg) qrImg.style.display = 'none';
+  if (qrLoading) qrLoading.style.display = 'flex';
+
+  try {
+    const data = await apiRequest('POST', '/api/telegram/start-qr');
+    if (data && data.authorized) {
+      showNotification(_lang === 'ru' ? 'Telegram подключён!' : 'Telegram connected!', 'success');
+      cancelTgLogin();
+      loadTelegramStatus();
+      return;
+    }
+    if (data && data.qrImageUrl) {
+      if (qrImg) {
+        qrImg.src = data.qrImageUrl;
+        qrImg.style.display = 'block';
+      }
+      if (qrLoading) qrLoading.style.display = 'none';
+
+      // Poll for auth completion
+      if (_tgQrPollTimer) clearInterval(_tgQrPollTimer);
+      _tgQrPollTimer = setInterval(async () => {
+        const status = await apiRequest('GET', '/api/telegram/status');
+        if (status && status.authorized) {
+          clearInterval(_tgQrPollTimer);
+          _tgQrPollTimer = null;
+          showNotification(_lang === 'ru' ? 'Telegram подключён!' : 'Telegram connected!', 'success');
+          cancelTgLogin();
+          loadTelegramStatus();
+        }
+      }, 3000);
+    } else {
+      showNotification(data?.error || 'Failed to generate QR', 'error');
+      cancelTgLogin();
+    }
+  } catch (e) {
+    showNotification(e.message || 'Error', 'error');
+    cancelTgLogin();
+  }
+}
+
+function startTgPhoneLogin() {
+  const qrArea = document.getElementById('tg-qr-area');
+  const phoneArea = document.getElementById('tg-phone-area');
+  if (qrArea) qrArea.style.display = 'none';
+  if (phoneArea) phoneArea.style.display = 'block';
+  document.getElementById('tg-phone-step-1').style.display = 'block';
+  document.getElementById('tg-phone-step-2').style.display = 'none';
+  document.getElementById('tg-phone-step-3').style.display = 'none';
+}
+
+async function sendTgPhoneCode() {
+  const phone = document.getElementById('tg-phone-input')?.value?.trim();
+  if (!phone) return showNotification('Enter phone number', 'error');
+  try {
+    const data = await apiRequest('POST', '/api/telegram/send-phone', { phone });
+    if (data.type === 'already_authorized') {
+      showNotification(_lang === 'ru' ? 'Уже авторизован' : 'Already authorized', 'success');
+      cancelTgLogin();
+      loadTelegramStatus();
+      return;
+    }
+    if (data.type === 'code_sent') {
+      document.getElementById('tg-phone-step-1').style.display = 'none';
+      document.getElementById('tg-phone-step-2').style.display = 'block';
+      showNotification(data.info || 'Code sent', 'success');
+    } else {
+      showNotification(data.error || 'Error', 'error');
+    }
+  } catch (e) {
+    showNotification(e.message, 'error');
+  }
+}
+
+async function submitTgCode() {
+  const code = document.getElementById('tg-code-input')?.value?.trim();
+  if (!code) return showNotification('Enter code', 'error');
+  try {
+    const data = await apiRequest('POST', '/api/telegram/submit-code', { code });
+    if (data.type === 'authorized') {
+      showNotification(_lang === 'ru' ? 'Telegram подключён!' : 'Telegram connected!', 'success');
+      cancelTgLogin();
+      loadTelegramStatus();
+    } else if (data.type === 'need_password') {
+      document.getElementById('tg-phone-step-2').style.display = 'none';
+      document.getElementById('tg-phone-step-3').style.display = 'block';
+      showNotification('2FA password required', 'info');
+    } else {
+      showNotification(data.error || 'Error', 'error');
+    }
+  } catch (e) {
+    showNotification(e.message, 'error');
+  }
+}
+
+async function submitTg2FA() {
+  const password = document.getElementById('tg-2fa-input')?.value;
+  if (!password) return showNotification('Enter 2FA password', 'error');
+  try {
+    const data = await apiRequest('POST', '/api/telegram/submit-password', { password });
+    if (data.type === 'authorized') {
+      showNotification(_lang === 'ru' ? 'Telegram подключён!' : 'Telegram connected!', 'success');
+      cancelTgLogin();
+      loadTelegramStatus();
+    } else {
+      showNotification(data.error || 'Wrong password', 'error');
+    }
+  } catch (e) {
+    showNotification(e.message, 'error');
+  }
+}
+
+async function disconnectTelegram() {
+  if (!confirm(_lang === 'ru' ? 'Отключить Telegram аккаунт?' : 'Disconnect Telegram account?')) return;
+  try {
+    await apiRequest('POST', '/api/telegram/logout');
+    showNotification(_lang === 'ru' ? 'Telegram отключён' : 'Telegram disconnected', 'success');
+    loadTelegramStatus();
+  } catch (e) {
+    showNotification(e.message, 'error');
+  }
+}
+
+function cancelTgLogin() {
+  if (_tgQrPollTimer) { clearInterval(_tgQrPollTimer); _tgQrPollTimer = null; }
+  const qrArea = document.getElementById('tg-qr-area');
+  const phoneArea = document.getElementById('tg-phone-area');
+  if (qrArea) qrArea.style.display = 'none';
+  if (phoneArea) phoneArea.style.display = 'none';
+}
+
 // ===== CONNECTORS PAGE =====
 let _connectors = {};
 let _userVars = {};
 
 async function loadConnectors() {
+  // Also load TG status when connectors page loads
+  loadTelegramStatus();
   const data = await apiRequest('GET', '/api/settings');
   if (!data.ok) return;
   const s = data.settings || {};

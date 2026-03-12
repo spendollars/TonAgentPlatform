@@ -5,8 +5,9 @@ import { getOrchestrator, MODEL_LIST, getUserModel, setUserModel, type ModelId, 
 import {
   authSendPhone, authSubmitCode, authSubmitPassword,
   authStartQR, cancelQRLogin, type Complete2FAFn,
-  isAuthorized, getAuthState, clearAuthState,
+  isAuthorized, isAuthorizedForUser, getAuthState, clearAuthState,
   getGiftFloorPrice, getAllGiftFloors,
+  logoutUser, getTgAccountInfo,
 } from './fragment-service';
 import { universalAgentChat } from './universal-agent-chat';
 import { initNotifier } from './notifier';
@@ -1002,13 +1003,18 @@ bot.command('plugin', async (ctx) => {
 // ── /tglogin — авторизация Telegram для Fragment API ──────────────
 bot.command('tglogin', async (ctx) => {
   const userId = ctx.from.id;
-  const isAuth = await isAuthorized();
+  const isAuth = await isAuthorizedForUser(userId);
 
   if (isAuth) {
+    const { getTgAccountInfo } = await import('./fragment-service');
+    const info = await getTgAccountInfo(userId);
     await ctx.reply(
       '✅ <b>Telegram уже авторизован</b>\n\n' +
-      'Fragment данные доступны. Используй:\n' +
+      (info?.username ? `👤 Аккаунт: @${info.username}\n` : '') +
+      (info?.phone ? `📞 Телефон: ${info.phone}\n\n` : '\n') +
+      'Используй:\n' +
       '• <code>/gifts</code> — топ подарков с floor ценами\n' +
+      '• <code>/tglogout</code> — отключить аккаунт\n' +
       '• Спроси в чате: <i>"цена jelly bunny на Fragment"</i>',
       { parse_mode: 'HTML' }
     );
@@ -1034,12 +1040,45 @@ bot.command('tglogin', async (ctx) => {
   );
 });
 
+// ── /tglogout — отключить Telegram аккаунт ────────────────────────
+bot.command('tglogout', async (ctx) => {
+  const userId = ctx.from.id;
+  const isAuth = await isAuthorizedForUser(userId);
+  if (!isAuth) {
+    await ctx.reply('Telegram аккаунт не подключён.', { parse_mode: 'HTML' });
+    return;
+  }
+  await logoutUser(userId);
+  await ctx.reply(
+    '✅ Telegram аккаунт отключён.\n\nИспользуй /tglogin чтобы подключить снова.',
+    { parse_mode: 'HTML' }
+  );
+});
+
+// ── /tgstatus — статус подключения ────────────────────────────────
+bot.command('tgstatus', async (ctx) => {
+  const userId = ctx.from.id;
+  const info = await getTgAccountInfo(userId);
+  if (!info || !info.authorized) {
+    await ctx.reply('❌ Telegram аккаунт не подключён.\nИспользуй /tglogin', { parse_mode: 'HTML' });
+    return;
+  }
+  await ctx.reply(
+    '✅ <b>Telegram подключён</b>\n\n' +
+    `👤 ${info.firstName || ''} ${info.lastName || ''}\n` +
+    (info.username ? `@${info.username}\n` : '') +
+    (info.phone ? `📞 ${info.phone}\n` : '') +
+    `🆔 ${info.userId}`,
+    { parse_mode: 'HTML' }
+  );
+});
+
 // ── /gifts — показать топ подарков Fragment ───────────────────────
 bot.command('gifts', async (ctx) => {
   const userId = ctx.from.id;
   await ctx.sendChatAction('typing');
 
-  const isAuth = await isAuthorized();
+  const isAuth = await isAuthorizedForUser(userId);
   if (!isAuth) {
     await ctx.reply(
       '🔑 Для получения данных Fragment нужна авторизация.\n\n' +
@@ -1700,7 +1739,8 @@ bot.action('gifts_catalog', async (ctx) => {
 
 bot.action('gifts_stars_balance', async (ctx) => {
   await ctx.answerCbQuery();
-  const isAuth = await isAuthorized().catch(() => false);
+  const userId = ctx.from!.id;
+  const isAuth = await isAuthorizedForUser(userId).catch(() => false);
   if (!isAuth) {
     await ctx.reply('❌ Для просмотра баланса Stars нужна авторизация Telegram.\nИспользуйте /tglogin', {
       reply_markup: { inline_keyboard: [[{ text: '🔑 /tglogin', callback_data: 'tg_login_start' }]] },
@@ -1745,8 +1785,9 @@ bot.action('gifts_giftasset', async (ctx) => {
 
 bot.action('gifts_userbot', async (ctx) => {
   await ctx.answerCbQuery();
-  const ru = getUserLang(ctx.from!.id) === 'ru';
-  const isAuth = await isAuthorized().catch(() => false);
+  const userId = ctx.from!.id;
+  const ru = getUserLang(userId) === 'ru';
+  const isAuth = await isAuthorizedForUser(userId).catch(() => false);
   const text = isAuth
     ? (ru
         ? '✅ <b>Telegram Userbot активен</b>\n\nЮзербот авторизован и готов к работе.\nАгенты могут:\n• Покупать/продавать подарки за Stars\n• Управлять каналами\n• Читать и отправлять сообщения\n• Участвовать в обсуждениях'
@@ -3183,7 +3224,7 @@ bot.on('callback_query', async (ctx) => {
     await ctx.answerCbQuery('Отменено');
     pendingTgAuth.delete(userId);
     clearAuthState(userId);
-    cancelQRLogin();
+    cancelQRLogin(userId);
     complete2FAFns.delete(userId);
     // cleanup legacy polling handle if any
     const h = qrPollingHandles.get(userId);
@@ -3215,6 +3256,7 @@ bot.on('callback_query', async (ctx) => {
 
     // Callback fires each time a new QR is ready (first call + every ~25s refresh)
     authStartQR(
+      userId,
       async (qrUrl: string, expiresIn: number) => {
         if (!['qr_waiting'].includes(pendingTgAuth.get(userId) ?? '')) return; // user cancelled or moved to password step
         const qrImageUrl =
@@ -3811,6 +3853,7 @@ bot.on('callback_query', async (ctx) => {
     pendingTgAuth.set(userId, 'qr_waiting');
 
     authStartQR(
+      userId,
       async (qrUrl: string, expiresIn: number) => {
         if (!['qr_waiting'].includes(pendingTgAuth.get(userId) ?? '')) return;
         const qrImageUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=' + encodeURIComponent(qrUrl);
@@ -3947,8 +3990,8 @@ bot.on('callback_query', async (ctx) => {
     const agentId = parseInt(data.split(':')[1], 10);
     await ctx.answerCbQuery();
     try {
-      const { isAuthorized } = await import('./fragment-service');
-      const authed = await isAuthorized();
+      const { isAuthorizedForUser: isAuthForUser } = await import('./fragment-service');
+      const authed = await isAuthForUser(userId);
       if (!authed) {
         await editOrReply(ctx,
           `🧑‍💻 <b>Telegram Userbot</b>\n\n` +
@@ -4409,7 +4452,7 @@ bot.on(message('text'), async (ctx) => {
     if (trimmed === '/cancel' || trimmed.toLowerCase() === 'отмена') {
       pendingTgAuth.delete(userId);
       clearAuthState(userId);
-      cancelQRLogin(); // stop QR event listener if active
+      cancelQRLogin(userId); // stop QR event listener if active
       complete2FAFns.delete(userId);
       await ctx.reply('❌ Авторизация отменена.');
       return;

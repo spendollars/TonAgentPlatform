@@ -1325,6 +1325,112 @@ export function startApiServer() {
     }
   });
 
+  // ── Telegram Userbot API ─────────────────────────────────
+  // GET /api/telegram/status — check if user's TG account is connected
+  app.get('/api/telegram/status', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId;
+      const { getTgAccountInfo } = await import('./fragment-service');
+      const info = await getTgAccountInfo(userId);
+      res.json(info || { authorized: false });
+    } catch (e: any) {
+      res.json({ authorized: false, error: e.message });
+    }
+  });
+
+  // POST /api/telegram/start-qr — start QR login, returns QR URL
+  app.post('/api/telegram/start-qr', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId;
+      const { authStartQR } = await import('./fragment-service');
+
+      let qrUrl = '';
+      let expiresIn = 0;
+      let resolved = false;
+
+      const result = await Promise.race([
+        authStartQR(
+          userId,
+          async (url: string, expires: number) => {
+            if (!resolved) {
+              qrUrl = url;
+              expiresIn = expires;
+              resolved = true;
+            }
+          },
+          undefined,
+          120_000,
+        ),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+      ]);
+
+      if (result && (result as any).ok) {
+        res.json({ ok: true, authorized: true });
+      } else if (qrUrl) {
+        const qrImageUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=' + encodeURIComponent(qrUrl);
+        res.json({ ok: true, qrUrl, qrImageUrl, expiresIn });
+      } else {
+        res.json({ ok: false, error: 'Failed to generate QR' });
+      }
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  // POST /api/telegram/send-phone — start phone auth
+  app.post('/api/telegram/send-phone', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId;
+      const { phone } = req.body;
+      if (!phone) return res.status(400).json({ error: 'phone required' });
+      const { authSendPhone } = await import('./fragment-service');
+      const result = await authSendPhone(userId, phone);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/telegram/submit-code — submit OTP code
+  app.post('/api/telegram/submit-code', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId;
+      const { code } = req.body;
+      if (!code) return res.status(400).json({ error: 'code required' });
+      const { authSubmitCode } = await import('./fragment-service');
+      const result = await authSubmitCode(userId, code);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/telegram/submit-password — submit 2FA password
+  app.post('/api/telegram/submit-password', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId;
+      const { password } = req.body;
+      if (!password) return res.status(400).json({ error: 'password required' });
+      const { authSubmitPassword } = await import('./fragment-service');
+      await authSubmitPassword(userId, password);
+      res.json({ type: 'authorized', info: 'Авторизован успешно!' });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/telegram/logout — disconnect TG account
+  app.post('/api/telegram/logout', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).userId;
+      const { logoutUser } = await import('./fragment-service');
+      await logoutUser(userId);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── GET /api/stats ────────────────────────────────────────
   // Реальная глобальная статистика из БД
   app.get('/api/stats', async (_req: Request, res: Response) => {

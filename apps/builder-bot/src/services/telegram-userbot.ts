@@ -1,25 +1,12 @@
 /**
- * Telegram Userbot Service
+ * Telegram Userbot Service — Per-user MTProto
  *
- * Exposes GramJS MTProto capabilities to agent sandboxes:
- *  - sendMessage   — send as real Telegram user
- *  - getMessages   — read messages from any chat/channel
- *  - getChannelInfo — metadata about a channel/group
- *  - joinChannel   — join a public channel/group
- *  - leaveChannel  — leave a channel/group
- *  - getDialogs    — list of active chats (inbox)
- *  - getMembers    — list of members in a group
- *  - forwardMessage — forward a message
- *  - deleteMessage — delete own message
- *  - searchMessages — search messages in a chat
- *  - getUserInfo   — get info about a user
- *
- * Uses the authenticated GramJS session from fragment-service (shared session).
- * Agents can only use this if the platform owner authenticated via /tglogin.
+ * All functions now accept userId to get the correct per-user GramJS client.
+ * Backward-compatible: if userId is omitted, falls back to legacy singleton.
  */
 
 import { Api } from 'telegram/tl';
-import { getFragmentClient } from '../fragment-service';
+import { getFragmentClientForUser, getFragmentClient } from '../fragment-service';
 
 type TgMsg = {
   id:     number;
@@ -36,16 +23,20 @@ type TgDialog = {
   unread: number;
 };
 
-/** Send a text message as the authenticated Telegram user */
-export async function tgSendMessage(chatId: string | number, text: string): Promise<number> {
-  const client = await getFragmentClient();
+/** Get client for user (or legacy fallback) */
+async function getClient(userId?: number) {
+  if (userId) return getFragmentClientForUser(userId);
+  return getFragmentClient();
+}
+
+export async function tgSendMessage(chatId: string | number, text: string, userId?: number): Promise<number> {
+  const client = await getClient(userId);
   const result = await (client as any).sendMessage(chatId, { message: text }) as any;
   return result?.id ?? 0;
 }
 
-/** Get latest messages from a chat/channel */
-export async function tgGetMessages(chatId: string | number, limit = 20): Promise<TgMsg[]> {
-  const client = await getFragmentClient();
+export async function tgGetMessages(chatId: string | number, limit = 20, userId?: number): Promise<TgMsg[]> {
+  const client = await getClient(userId);
   const msgs = await (client as any).getMessages(chatId, { limit }) as any[];
   return msgs.map((m: any) => ({
     id:     m.id,
@@ -56,11 +47,10 @@ export async function tgGetMessages(chatId: string | number, limit = 20): Promis
   }));
 }
 
-/** Get channel/group info */
-export async function tgGetChannelInfo(chatId: string | number): Promise<{
+export async function tgGetChannelInfo(chatId: string | number, userId?: number): Promise<{
   id: string; title: string; username?: string; membersCount?: number; description?: string;
 }> {
-  const client = await getFragmentClient();
+  const client = await getClient(userId);
   const entity = await (client as any).getEntity(chatId) as any;
   return {
     id:           String(entity.id),
@@ -71,25 +61,22 @@ export async function tgGetChannelInfo(chatId: string | number): Promise<{
   };
 }
 
-/** Join a public channel/group by username or invite link */
-export async function tgJoinChannel(channelUsername: string): Promise<void> {
-  const client = await getFragmentClient();
+export async function tgJoinChannel(channelUsername: string, userId?: number): Promise<void> {
+  const client = await getClient(userId);
   await (client as any).invoke(new Api.channels.JoinChannel({
     channel: await (client as any).getEntity(channelUsername),
   }));
 }
 
-/** Leave a channel/group */
-export async function tgLeaveChannel(channelUsername: string | number): Promise<void> {
-  const client = await getFragmentClient();
+export async function tgLeaveChannel(channelUsername: string | number, userId?: number): Promise<void> {
+  const client = await getClient(userId);
   await (client as any).invoke(new Api.channels.LeaveChannel({
     channel: await (client as any).getEntity(channelUsername),
   }));
 }
 
-/** Get list of dialogs (active chats) */
-export async function tgGetDialogs(limit = 20): Promise<TgDialog[]> {
-  const client = await getFragmentClient();
+export async function tgGetDialogs(limit = 20, userId?: number): Promise<TgDialog[]> {
+  const client = await getClient(userId);
   const dialogs = await (client as any).getDialogs({ limit }) as any[];
   return dialogs.map((d: any) => ({
     id:     String(d.id),
@@ -99,11 +86,10 @@ export async function tgGetDialogs(limit = 20): Promise<TgDialog[]> {
   }));
 }
 
-/** Get group/channel members */
-export async function tgGetMembers(chatId: string | number, limit = 50): Promise<{
+export async function tgGetMembers(chatId: string | number, limit = 50, userId?: number): Promise<{
   id: number; username?: string; name: string;
 }[]> {
-  const client = await getFragmentClient();
+  const client = await getClient(userId);
   const participants = await (client as any).getParticipants(chatId, { limit }) as any[];
   return participants.map((p: any) => ({
     id:       p.id?.toJSNumber?.() ?? Number(p.id),
@@ -112,24 +98,21 @@ export async function tgGetMembers(chatId: string | number, limit = 50): Promise
   }));
 }
 
-/** Forward a message from one chat to another */
-export async function tgForwardMessage(fromChatId: string | number, messageId: number, toChatId: string | number): Promise<void> {
-  const client = await getFragmentClient();
+export async function tgForwardMessage(fromChatId: string | number, messageId: number, toChatId: string | number, userId?: number): Promise<void> {
+  const client = await getClient(userId);
   await (client as any).forwardMessages(toChatId, {
     messages: [messageId],
     fromPeer: fromChatId,
   });
 }
 
-/** Delete own message */
-export async function tgDeleteMessage(chatId: string | number, messageId: number): Promise<void> {
-  const client = await getFragmentClient();
+export async function tgDeleteMessage(chatId: string | number, messageId: number, userId?: number): Promise<void> {
+  const client = await getClient(userId);
   await (client as any).deleteMessages(chatId, [messageId], { revoke: true });
 }
 
-/** Search messages in a chat */
-export async function tgSearchMessages(chatId: string | number, query: string, limit = 20): Promise<TgMsg[]> {
-  const client = await getFragmentClient();
+export async function tgSearchMessages(chatId: string | number, query: string, limit = 20, userId?: number): Promise<TgMsg[]> {
+  const client = await getClient(userId);
   const msgs = await (client as any).getMessages(chatId, { limit, search: query }) as any[];
   return msgs.map((m: any) => ({
     id:     m.id,
@@ -140,11 +123,10 @@ export async function tgSearchMessages(chatId: string | number, query: string, l
   }));
 }
 
-/** Get info about a Telegram user by username or ID */
-export async function tgGetUserInfo(userIdentifier: string | number): Promise<{
+export async function tgGetUserInfo(userIdentifier: string | number, userId?: number): Promise<{
   id: number; username?: string; firstName?: string; lastName?: string; bio?: string; phone?: string;
 }> {
-  const client = await getFragmentClient();
+  const client = await getClient(userId);
   const entity = await (client as any).getEntity(userIdentifier) as any;
   return {
     id:        entity.id?.toJSNumber?.() ?? Number(entity.id),
@@ -156,16 +138,14 @@ export async function tgGetUserInfo(userIdentifier: string | number): Promise<{
   };
 }
 
-/** Send a file/media message */
-export async function tgSendFile(chatId: string | number, filePath: string, caption?: string): Promise<number> {
-  const client = await getFragmentClient();
+export async function tgSendFile(chatId: string | number, filePath: string, caption?: string, userId?: number): Promise<number> {
+  const client = await getClient(userId);
   const result = await (client as any).sendFile(chatId, { file: filePath, caption }) as any;
   return result?.id ?? 0;
 }
 
-/** Reply to a specific message in a chat */
-export async function tgReplyMessage(chatId: string | number, replyToMsgId: number, text: string): Promise<number> {
-  const client = await getFragmentClient();
+export async function tgReplyMessage(chatId: string | number, replyToMsgId: number, text: string, userId?: number): Promise<number> {
+  const client = await getClient(userId);
   const result = await (client as any).sendMessage(chatId, {
     message: text,
     replyTo: replyToMsgId,
@@ -173,9 +153,8 @@ export async function tgReplyMessage(chatId: string | number, replyToMsgId: numb
   return result?.id ?? 0;
 }
 
-/** Send reaction (emoji) to a message */
-export async function tgReactMessage(chatId: string | number, messageId: number, emoji: string): Promise<void> {
-  const client = await getFragmentClient();
+export async function tgReactMessage(chatId: string | number, messageId: number, emoji: string, userId?: number): Promise<void> {
+  const client = await getClient(userId);
   const peer = await (client as any).getInputEntity(chatId);
   await (client as any).invoke(new Api.messages.SendReaction({
     peer,
@@ -184,39 +163,29 @@ export async function tgReactMessage(chatId: string | number, messageId: number,
   }));
 }
 
-/** Edit own message */
-export async function tgEditMessage(chatId: string | number, messageId: number, newText: string): Promise<void> {
-  const client = await getFragmentClient();
+export async function tgEditMessage(chatId: string | number, messageId: number, newText: string, userId?: number): Promise<void> {
+  const client = await getClient(userId);
   await (client as any).editMessage(chatId, { message: messageId, text: newText });
 }
 
-/** Pin a message in a chat */
-export async function tgPinMessage(chatId: string | number, messageId: number, silent = true): Promise<void> {
-  const client = await getFragmentClient();
+export async function tgPinMessage(chatId: string | number, messageId: number, silent = true, userId?: number): Promise<void> {
+  const client = await getClient(userId);
   await (client as any).pinMessage(chatId, messageId, { notify: !silent });
 }
 
-/** Mark messages in a chat as read */
-export async function tgMarkRead(chatId: string | number): Promise<void> {
-  const client = await getFragmentClient();
+export async function tgMarkRead(chatId: string | number, userId?: number): Promise<void> {
+  const client = await getClient(userId);
   await (client as any).markAsRead(chatId);
 }
 
-/** Get discussion/comments for a channel post */
-export async function tgGetComments(chatId: string | number, postMsgId: number, limit = 30): Promise<TgMsg[]> {
-  const client = await getFragmentClient();
+export async function tgGetComments(chatId: string | number, postMsgId: number, limit = 30, userId?: number): Promise<TgMsg[]> {
+  const client = await getClient(userId);
   try {
     const peer = await (client as any).getInputEntity(chatId);
     const result = await (client as any).invoke(new Api.messages.GetReplies({
-      peer,
-      msgId: postMsgId,
-      offsetId: 0,
-      offsetDate: 0,
-      addOffset: 0,
-      limit,
-      maxId: 0,
-      minId: 0,
-      hash: 0 as any,
+      peer, msgId: postMsgId,
+      offsetId: 0, offsetDate: 0, addOffset: 0,
+      limit, maxId: 0, minId: 0, hash: 0 as any,
     })) as any;
     return (result.messages || []).map((m: any) => ({
       id:     m.id,
@@ -230,20 +199,17 @@ export async function tgGetComments(chatId: string | number, postMsgId: number, 
   }
 }
 
-/** Set "typing" status in a chat */
-export async function tgSetTyping(chatId: string | number, seconds = 3): Promise<void> {
-  const client = await getFragmentClient();
+export async function tgSetTyping(chatId: string | number, seconds = 3, userId?: number): Promise<void> {
+  const client = await getClient(userId);
   const peer = await (client as any).getInputEntity(chatId);
   await (client as any).invoke(new Api.messages.SetTyping({
     peer,
     action: new Api.SendMessageTypingAction(),
   }));
-  // Typing status auto-expires after ~5 seconds, but we respect the parameter
 }
 
-/** Send message with HTML formatting */
-export async function tgSendFormatted(chatId: string | number, html: string, replyTo?: number): Promise<number> {
-  const client = await getFragmentClient();
+export async function tgSendFormatted(chatId: string | number, html: string, replyTo?: number, userId?: number): Promise<number> {
+  const client = await getClient(userId);
   const result = await (client as any).sendMessage(chatId, {
     message: html,
     parseMode: 'html',
@@ -252,9 +218,8 @@ export async function tgSendFormatted(chatId: string | number, html: string, rep
   return result?.id ?? 0;
 }
 
-/** Get specific message by ID */
-export async function tgGetMessageById(chatId: string | number, messageId: number): Promise<TgMsg | null> {
-  const client = await getFragmentClient();
+export async function tgGetMessageById(chatId: string | number, messageId: number, userId?: number): Promise<TgMsg | null> {
+  const client = await getClient(userId);
   try {
     const msgs = await (client as any).getMessages(chatId, { ids: [messageId] }) as any[];
     if (msgs.length === 0) return null;
@@ -271,9 +236,8 @@ export async function tgGetMessageById(chatId: string | number, messageId: numbe
   }
 }
 
-/** Get unread dialogs with messages */
-export async function tgGetUnread(limit = 10): Promise<{ chatId: string; title: string; unread: number; lastMessage: string }[]> {
-  const client = await getFragmentClient();
+export async function tgGetUnread(limit = 10, userId?: number): Promise<{ chatId: string; title: string; unread: number; lastMessage: string }[]> {
+  const client = await getClient(userId);
   const dialogs = await (client as any).getDialogs({ limit: 50 }) as any[];
   return dialogs
     .filter((d: any) => (d.unreadCount || 0) > 0)
@@ -288,31 +252,31 @@ export async function tgGetUnread(limit = 10): Promise<{ chatId: string; title: 
 
 /**
  * Build a sandbox-safe userbot object for agent execution.
- * Only exposed if user is authenticated via /tglogin.
+ * Now accepts userId for per-user isolation.
  */
-export function buildUserbotSandbox() {
+export function buildUserbotSandbox(userId?: number) {
   return {
-    sendMessage:    tgSendMessage,
-    getMessages:    tgGetMessages,
-    getChannelInfo: tgGetChannelInfo,
-    joinChannel:    tgJoinChannel,
-    leaveChannel:   tgLeaveChannel,
-    getDialogs:     tgGetDialogs,
-    getMembers:     tgGetMembers,
-    forwardMessage: tgForwardMessage,
-    deleteMessage:  tgDeleteMessage,
-    searchMessages: tgSearchMessages,
-    getUserInfo:    tgGetUserInfo,
-    sendFile:       tgSendFile,
-    replyMessage:   tgReplyMessage,
-    reactMessage:   tgReactMessage,
-    editMessage:    tgEditMessage,
-    pinMessage:     tgPinMessage,
-    markRead:       tgMarkRead,
-    getComments:    tgGetComments,
-    setTyping:      tgSetTyping,
-    sendFormatted:  tgSendFormatted,
-    getMessageById: tgGetMessageById,
-    getUnread:      tgGetUnread,
+    sendMessage:    (chatId: string | number, text: string) => tgSendMessage(chatId, text, userId),
+    getMessages:    (chatId: string | number, limit?: number) => tgGetMessages(chatId, limit, userId),
+    getChannelInfo: (chatId: string | number) => tgGetChannelInfo(chatId, userId),
+    joinChannel:    (channelUsername: string) => tgJoinChannel(channelUsername, userId),
+    leaveChannel:   (channelUsername: string | number) => tgLeaveChannel(channelUsername, userId),
+    getDialogs:     (limit?: number) => tgGetDialogs(limit, userId),
+    getMembers:     (chatId: string | number, limit?: number) => tgGetMembers(chatId, limit, userId),
+    forwardMessage: (from: string | number, msgId: number, to: string | number) => tgForwardMessage(from, msgId, to, userId),
+    deleteMessage:  (chatId: string | number, msgId: number) => tgDeleteMessage(chatId, msgId, userId),
+    searchMessages: (chatId: string | number, query: string, limit?: number) => tgSearchMessages(chatId, query, limit, userId),
+    getUserInfo:    (user: string | number) => tgGetUserInfo(user, userId),
+    sendFile:       (chatId: string | number, file: string, caption?: string) => tgSendFile(chatId, file, caption, userId),
+    replyMessage:   (chatId: string | number, replyTo: number, text: string) => tgReplyMessage(chatId, replyTo, text, userId),
+    reactMessage:   (chatId: string | number, msgId: number, emoji: string) => tgReactMessage(chatId, msgId, emoji, userId),
+    editMessage:    (chatId: string | number, msgId: number, text: string) => tgEditMessage(chatId, msgId, text, userId),
+    pinMessage:     (chatId: string | number, msgId: number, silent?: boolean) => tgPinMessage(chatId, msgId, silent, userId),
+    markRead:       (chatId: string | number) => tgMarkRead(chatId, userId),
+    getComments:    (chatId: string | number, postId: number, limit?: number) => tgGetComments(chatId, postId, limit, userId),
+    setTyping:      (chatId: string | number, seconds?: number) => tgSetTyping(chatId, seconds, userId),
+    sendFormatted:  (chatId: string | number, html: string, replyTo?: number) => tgSendFormatted(chatId, html, replyTo, userId),
+    getMessageById: (chatId: string | number, msgId: number) => tgGetMessageById(chatId, msgId, userId),
+    getUnread:      (limit?: number) => tgGetUnread(limit, userId),
   };
 }

@@ -1146,6 +1146,99 @@
           </div>
         </div>
         <div class="page-content">
+          <!-- Telegram Userbot Connection -->
+          <div class="panel" style="margin-bottom:2rem;border:1px solid #0098EA33">
+            <div class="panel-header" style="border-bottom:1px solid #ffffff10">
+              <h3 class="panel-title" style="display:flex;align-items:center;gap:.5rem">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="#0098EA"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.161l-1.97 9.276c-.146.658-.537.818-1.084.508l-3-2.211-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12L8.308 13.79l-2.971-.927c-.646-.203-.658-.646.135-.958l11.61-4.474c.538-.196 1.006.131.48.73z"/></svg>
+                <span data-en="Telegram Account" data-ru="Telegram Аккаунт">Telegram Account</span>
+              </h3>
+              <span class="credential-status" id="tg-userbot-status" style="font-size:.75rem">Checking...</span>
+            </div>
+            <div style="padding:1.25rem">
+              <p style="color:#ffffff80;font-size:.85rem;margin-bottom:1rem" data-en="Connect your Telegram account to let agents act as a real user — send messages, read chats, join channels, trade gifts." data-ru="Подключите Telegram аккаунт, чтобы агенты действовали как реальный пользователь — отправляли сообщения, читали чаты, вступали в каналы, торговали подарками.">Connect your Telegram account to let agents act as a real user.</p>
+
+              <!-- Connected state -->
+              <div id="tg-connected-info" style="display:none;margin-bottom:1rem">
+                <div style="display:flex;align-items:center;gap:.75rem;padding:.75rem;border-radius:8px;background:#0098EA15;border:1px solid #0098EA33">
+                  <div style="width:40px;height:40px;border-radius:50%;background:#0098EA33;display:flex;align-items:center;justify-content:center;font-size:1.2rem">
+                    <span id="tg-avatar-emoji">👤</span>
+                  </div>
+                  <div style="flex:1">
+                    <div style="font-weight:600" id="tg-account-name">—</div>
+                    <div style="font-size:.8rem;color:#ffffff60" id="tg-account-details">—</div>
+                  </div>
+                  <button class="btn btn-ghost btn-sm" onclick="disconnectTelegram()" style="color:#ff6b6b">
+                    <span data-en="Disconnect" data-ru="Отключить">Disconnect</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Auth methods (shown when not connected) -->
+              <div id="tg-auth-methods" style="display:none">
+                <div style="display:flex;gap:.75rem;flex-wrap:wrap">
+                  <button class="btn btn-primary" onclick="startTgQRLogin()" id="tg-qr-btn" style="background:#0098EA">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/></svg>
+                    <span data-en="QR Code Login" data-ru="Вход по QR-коду">QR Code Login</span>
+                  </button>
+                  <button class="btn btn-ghost" onclick="startTgPhoneLogin()" id="tg-phone-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>
+                    <span data-en="Phone Number" data-ru="По номеру телефона">Phone Number</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- QR Login UI -->
+              <div id="tg-qr-area" style="display:none;margin-top:1rem">
+                <div style="text-align:center;padding:1rem;background:#ffffff08;border-radius:12px">
+                  <img id="tg-qr-image" src="" alt="QR Code" style="width:200px;height:200px;border-radius:8px;margin-bottom:.75rem;display:none">
+                  <div id="tg-qr-loading" style="width:200px;height:200px;margin:0 auto .75rem;display:flex;align-items:center;justify-content:center;border-radius:8px;background:#ffffff10">
+                    <div class="spinner"></div>
+                  </div>
+                  <p style="color:#ffffff80;font-size:.8rem" data-en="Open Telegram → Settings → Devices → Link Desktop Device" data-ru="Откройте Telegram → Настройки → Устройства → Подключить устройство">Open Telegram → Settings → Devices → Link Desktop Device</p>
+                  <button class="btn btn-ghost btn-sm" onclick="cancelTgLogin()" style="margin-top:.5rem">
+                    <span data-en="Cancel" data-ru="Отмена">Cancel</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Phone Login UI -->
+              <div id="tg-phone-area" style="display:none;margin-top:1rem">
+                <div style="display:flex;flex-direction:column;gap:.75rem">
+                  <div id="tg-phone-step-1">
+                    <input type="tel" class="form-input" id="tg-phone-input" placeholder="+7 999 123 4567" style="margin-bottom:.5rem">
+                    <button class="btn btn-primary btn-sm" onclick="sendTgPhoneCode()" style="background:#0098EA">
+                      <span data-en="Send Code" data-ru="Отправить код">Send Code</span>
+                    </button>
+                  </div>
+                  <div id="tg-phone-step-2" style="display:none">
+                    <input type="text" class="form-input" id="tg-code-input" placeholder="12345" maxlength="6" style="margin-bottom:.5rem">
+                    <button class="btn btn-primary btn-sm" onclick="submitTgCode()" style="background:#0098EA">
+                      <span data-en="Submit Code" data-ru="Подтвердить">Submit Code</span>
+                    </button>
+                  </div>
+                  <div id="tg-phone-step-3" style="display:none">
+                    <input type="password" class="form-input" id="tg-2fa-input" placeholder="2FA Password" style="margin-bottom:.5rem">
+                    <button class="btn btn-primary btn-sm" onclick="submitTg2FA()" style="background:#0098EA">
+                      <span data-en="Submit Password" data-ru="Подтвердить пароль">Submit Password</span>
+                    </button>
+                  </div>
+                  <button class="btn btn-ghost btn-sm" onclick="cancelTgLogin()">
+                    <span data-en="Cancel" data-ru="Отмена">Cancel</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Capabilities info -->
+              <div style="margin-top:1rem;display:flex;flex-wrap:wrap;gap:.5rem" id="tg-capabilities">
+                <span class="badge" style="background:#0098EA20;color:#0098EA;font-size:.7rem">20+ tools</span>
+                <span class="badge" style="background:#0098EA20;color:#0098EA;font-size:.7rem" data-en="Send/Read Messages" data-ru="Отправка/Чтение">Send/Read Messages</span>
+                <span class="badge" style="background:#0098EA20;color:#0098EA;font-size:.7rem" data-en="Gift Trading" data-ru="Торговля подарками">Gift Trading</span>
+                <span class="badge" style="background:#0098EA20;color:#0098EA;font-size:.7rem" data-en="Channel Management" data-ru="Управление каналами">Channel Management</span>
+              </div>
+            </div>
+          </div>
+
           <!-- Connector cards -->
           <div class="settings-grid" id="connectors-grid">
             <!-- Discord -->

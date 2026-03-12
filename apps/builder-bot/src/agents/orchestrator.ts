@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { isAuthorized as isFragmentAuthorized, getGiftFloorPrice, getAllGiftFloors } from '../fragment-service';
+import { isAuthorized as isFragmentAuthorized, isAuthorizedForUser, getGiftFloorPrice, getAllGiftFloors } from '../fragment-service';
 import { getCreatorAgent } from './sub-agents/creator';
 import { getWorkflowEngine } from '../agent-cooperation';
 import { getEditorAgent } from './sub-agents/editor';
@@ -1056,10 +1056,10 @@ ${studioContext?.source === 'studio' ? `
     if (/plugin|плагин/i.test(systemPrompt)) detectedCaps.push('plugins');
     if (/другой агент|inter.?agent|ask_agent|multi.?agent/i.test(systemPrompt)) detectedCaps.push('inter_agent');
 
-    // Check TG auth status
+    // Check TG auth status (per-user)
     let tgAuthed = false;
     try {
-      tgAuthed = await isFragmentAuthorized();
+      tgAuthed = await isAuthorizedForUser(userId);
     } catch {}
 
     const setupNeeds: AgentSetupNeeds = {
@@ -1934,7 +1934,7 @@ ${studioContext?.source === 'studio' ? `
 - Источник: getgems.io`;
       } else if (isGiftRequest) {
         // Try real Fragment data via MTProto (requires auth)
-        const fragmentAuth = await isFragmentAuthorized();
+        const fragmentAuth = await isAuthorizedForUser(userId);
         if (fragmentAuth) {
           // Extract gift slug from message
           const giftSlugMatch = message.match(/([a-z]+-[a-z]+(?:-[a-z]+)?)/i);

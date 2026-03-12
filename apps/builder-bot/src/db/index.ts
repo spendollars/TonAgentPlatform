@@ -61,6 +61,11 @@ export async function initDatabase() {
     initMarketplaceRepository(pool); // маркетплейс
     initBalanceTxRepository(pool);   // баланс леджер
 
+    // Wire up fragment service with DB-backed session storage
+    const { initFragmentDB } = await import('../fragment-service');
+    const { getUserSettingsRepository } = await import('./schema-extensions');
+    initFragmentDB(getUserSettingsRepository());
+
     console.log('✅ Database repositories initialized');
 
     return { success: true };

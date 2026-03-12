@@ -18,7 +18,7 @@ import {
   getAgentStateRepository,
   getAgentLogsRepository,
 } from '../db/schema-extensions';
-import { isAuthorized } from '../fragment-service';
+import { isAuthorized, isAuthorizedForUser } from '../fragment-service';
 import {
   tgSendMessage, tgGetMessages, tgGetChannelInfo,
   tgJoinChannel, tgLeaveChannel, tgGetDialogs,
@@ -2065,158 +2065,158 @@ async function executeTool(
     // ── Telegram Userbot tools (MTProto) ─────────────────────────
     case 'tg_send_message': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        return await tgSendMessage(args.peer as string, args.message as string);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        return await tgSendMessage(args.peer as string, args.message as string, params.userId);
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_get_messages': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        return await tgGetMessages(args.peer as string, args.limit ?? 20);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        return await tgGetMessages(args.peer as string, args.limit ?? 20, params.userId);
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_get_channel_info': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        return await tgGetChannelInfo(args.peer as string);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        return await tgGetChannelInfo(args.peer as string, params.userId);
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_join_channel': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        return await tgJoinChannel(args.peer as string);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        return await tgJoinChannel(args.peer as string, params.userId);
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_leave_channel': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        return await tgLeaveChannel(args.peer as string);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        return await tgLeaveChannel(args.peer as string, params.userId);
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_get_dialogs': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        return await tgGetDialogs(args.limit ?? 20);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        return await tgGetDialogs(args.limit ?? 20, params.userId);
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_get_members': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        return await tgGetMembers(args.peer as string, args.limit ?? 50);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        return await tgGetMembers(args.peer as string, args.limit ?? 50, params.userId);
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_search_messages': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        return await tgSearchMessages(args.peer as string, args.query as string, args.limit ?? 20);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        return await tgSearchMessages(args.peer as string, args.query as string, args.limit ?? 20, params.userId);
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_get_user_info': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        return await tgGetUserInfo(args.user as string);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        return await tgGetUserInfo(args.user as string, params.userId);
       } catch (e: any) { return { error: e.message }; }
     }
 
     // ── Extended Telegram Userbot tools ──
     case 'tg_reply': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        const msgId = await tgReplyMessage(args.chat_id as string, args.reply_to_id as number, args.text as string);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        const msgId = await tgReplyMessage(args.chat_id as string, args.reply_to_id as number, args.text as string, params.userId);
         return { ok: true, message_id: msgId };
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_react': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        await tgReactMessage(args.chat_id as string, args.message_id as number, args.emoji as string);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        await tgReactMessage(args.chat_id as string, args.message_id as number, args.emoji as string, params.userId);
         return { ok: true };
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_edit': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        await tgEditMessage(args.chat_id as string, args.message_id as number, args.new_text as string);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        await tgEditMessage(args.chat_id as string, args.message_id as number, args.new_text as string, params.userId);
         return { ok: true };
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_forward': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        await tgForwardMessage(args.from_chat as string, args.msg_id as number, args.to_chat as string);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        await tgForwardMessage(args.from_chat as string, args.msg_id as number, args.to_chat as string, params.userId);
         return { ok: true };
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_pin': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        await tgPinMessage(args.chat_id as string, args.message_id as number, args.silent !== false);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        await tgPinMessage(args.chat_id as string, args.message_id as number, args.silent !== false, params.userId);
         return { ok: true };
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_mark_read': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        await tgMarkRead(args.chat_id as string);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        await tgMarkRead(args.chat_id as string, params.userId);
         return { ok: true };
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_get_comments': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        return await tgGetComments(args.chat_id as string, args.post_id as number, args.limit ?? 30);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        return await tgGetComments(args.chat_id as string, args.post_id as number, args.limit ?? 30, params.userId);
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_set_typing': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        await tgSetTyping(args.chat_id as string);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        await tgSetTyping(args.chat_id as string, undefined, params.userId);
         return { ok: true };
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_send_formatted': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        const msgId = await tgSendFormatted(args.chat_id as string, args.html as string, args.reply_to);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        const msgId = await tgSendFormatted(args.chat_id as string, args.html as string, args.reply_to, params.userId);
         return { ok: true, message_id: msgId };
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_get_message_by_id': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        const msg = await tgGetMessageById(args.chat_id as string, args.message_id as number);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        const msg = await tgGetMessageById(args.chat_id as string, args.message_id as number, params.userId);
         return msg || { error: 'Message not found' };
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_get_unread': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        return await tgGetUnread(args.limit ?? 10);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        return await tgGetUnread(args.limit ?? 10, params.userId);
       } catch (e: any) { return { error: e.message }; }
     }
 
     case 'tg_send_file': {
       try {
-        if (!(await isAuthorized())) return { error: 'Telegram не авторизован. Выполните /tglogin' };
-        const msgId = await tgSendFile(args.chat_id as string, args.file_url as string, args.caption);
+        if (!(await isAuthorizedForUser(params.userId))) return { error: 'Telegram не авторизован. Выполните /tglogin' };
+        const msgId = await tgSendFile(args.chat_id as string, args.file_url as string, args.caption, params.userId);
         return { ok: true, message_id: msgId };
       } catch (e: any) { return { error: e.message }; }
     }

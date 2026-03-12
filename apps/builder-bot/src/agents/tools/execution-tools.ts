@@ -856,18 +856,14 @@ export class ExecutionTools {
             return (result.data || []).map((a: any) => ({ id: a.id, name: a.name, isActive: a.isActive, triggerType: a.triggerType }));
           },
 
-          // ── Telegram Userbot (доступен если платформа авторизована через /tglogin) ──
-          // Позволяет агенту действовать как полноценный Telegram-пользователь:
-          //   telegram.sendMessage(chatId, text)
-          //   telegram.getMessages(chatId, limit)
-          //   telegram.joinChannel(username)
-          //   telegram.getDialogs(limit)  и т.д.
+          // ── Telegram Userbot (per-user MTProto session) ──
+          // Each user's agents use their own Telegram account.
           telegram: await (async () => {
             try {
-              const auth = await isAuthorized();
-              if (auth) return buildUserbotSandbox();
+              const { isAuthorizedForUser } = await import('../../fragment-service');
+              const auth = await isAuthorizedForUser(params.userId);
+              if (auth) return buildUserbotSandbox(params.userId);
             } catch {}
-            // Not authenticated — return stub that throws helpful error
             const notAuthed = (method: string) => async (..._args: any[]) => {
               throw new Error(`telegram.${method}: не авторизован. Используй /tglogin в боте.`);
             };
